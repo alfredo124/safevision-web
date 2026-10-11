@@ -100,12 +100,40 @@ function CameraCard({
   onExpand: (id: string) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [boxes, setBoxes] = useState<BoundingBox[]>(camera.boxes);
 
   useEffect(() => {
     if (camera.mediaStream && videoRef.current) {
       videoRef.current.srcObject = camera.mediaStream;
     }
   }, [camera.mediaStream]);
+
+  // WebSocket para metadata en tiempo real
+  useEffect(() => {
+    if (!camera.mediaStream) {
+      const cameraId = camera.id.replace('cam-', '');
+      const socket = new WebSocket(`ws://localhost:8000/modules/ai_vision/ws/detections/${cameraId}`);
+      
+      socket.onmessage = (event) => {
+        try {
+          const detections = JSON.parse(event.data);
+          const newBoxes = detections.map((d: any, idx: number) => ({
+            id: `box-${idx}`,
+            label: d.name,
+            color: d.conf > 0.5 ? '#10b981' : '#ef4444',
+            top: `${(d.box[1] / 480) * 100}%`,
+            left: `${(d.box[0] / 640) * 100}%`,
+            width: `${((d.box[2] - d.box[0]) / 640) * 100}%`,
+            height: `${((d.box[3] - d.box[1]) / 480) * 100}%`
+          }));
+          setBoxes(newBoxes);
+        } catch (e) {
+          console.error("Error al procesar detecciones:", e);
+        }
+      };
+      return () => socket.close();
+    }
+  }, [camera.id, camera.mediaStream]);
 
   return (
     <div 
@@ -134,7 +162,7 @@ function CameraCard({
       </div>
 
       <div className="relative flex-1 bg-[#1a1a1a] flex items-center justify-center overflow-hidden min-h-[220px]">
-        {camera.mediaStream ? (
+                {camera.mediaStream ? (
           <video 
             ref={videoRef}
             autoPlay 
@@ -144,32 +172,11 @@ function CameraCard({
           />
         ) : (
           <img 
-            src={camera.streamUrl} 
+            src={`http://localhost:8000/modules/ai_vision/video_feed/${camera.id.replace('cam-', '')}`} 
             alt={camera.nombre} 
             className="w-full h-full object-cover opacity-75" 
           />
         )}
-        
-        {camera.boxes.map((box) => (
-          <div 
-            key={box.id}
-            style={{
-              top: box.top,
-              left: box.left,
-              width: box.width,
-              height: box.height,
-              borderColor: box.color
-            }}
-            className="absolute border-2 rounded-sm transition-all duration-300 pointer-events-none"
-          >
-            <span 
-              style={{ backgroundColor: box.color }}
-              className="absolute -top-5 left-0 text-black text-[9px] font-extrabold px-1 py-0.5 rounded-t whitespace-nowrap uppercase tracking-tighter"
-            >
-              {box.label}
-            </span>
-          </div>
-        ))}
       </div>
     </div>
   );
@@ -426,7 +433,7 @@ export function MonitoreoPage() {
             </button>
           </div>
 
-          <div className="relative flex-1 bg-black rounded border border-gray-800 overflow-hidden flex items-center justify-center">
+                    <div className="relative flex-1 bg-black rounded border border-gray-800 overflow-hidden flex items-center justify-center">
             {selectedCamera.mediaStream ? (
               <video 
                 ref={modalVideoRef}
@@ -437,32 +444,11 @@ export function MonitoreoPage() {
               />
             ) : (
               <img 
-                src={selectedCamera.streamUrl} 
+                src={`http://localhost:8000/modules/ai_vision/video_feed/${selectedCamera.id.replace('cam-', '')}`} 
                 alt={selectedCamera.nombre} 
                 className="w-full h-full object-contain" 
               />
             )}
-
-            {selectedCamera.boxes.map((box) => (
-              <div 
-                key={box.id}
-                style={{
-                  top: box.top,
-                  left: box.left,
-                  width: box.width,
-                  height: box.height,
-                  borderColor: box.color
-                }}
-                className="absolute border-2 rounded-sm pointer-events-none"
-              >
-                <span 
-                  style={{ backgroundColor: box.color }}
-                  className="absolute -top-6 left-0 text-black text-xs font-black px-1.5 py-0.5 rounded-t uppercase tracking-wider shadow"
-                >
-                  {box.label}
-                </span>
-              </div>
-            ))}
           </div>
         </div>
       )}
