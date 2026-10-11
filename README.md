@@ -1,75 +1,103 @@
-# React + TypeScript + Vite
+# SafeVision Web
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Frontend del sistema SafeVision, desarrollado con React + TypeScript + Vite.
 
-Currently, two official plugins are available:
+## Descripción
+Este proyecto contiene la interfaz de usuario para el sistema de monitoreo de EPP, donde se muestran:
+- login de usuarios
+- dashboard de monitoreo
+- visualización de incidencias
+- reportes y configuración de reglas
+- navegación principal para el usuario administrador
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Requisitos previos
+Antes de instalar dependencias, asegúrate de tener:
+- Node.js 18 o superior
+- npm o yarn
+- acceso a la carpeta del proyecto
 
-## React Compiler
+## Instalación de dependencias
+Desde la raíz del proyecto `safevision-web`, ejecuta:
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+### Windows (PowerShell)
+```powershell
+cd c:\git\universidad\safevision-web
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://npmx.dev/package/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://npmx.dev/package/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+### Linux / macOS
+```bash
+cd /ruta/al/proyecto/safevision-web
+npm install
 ```
+
+## Dependencias del proyecto
+El proyecto usa estas librerías principales:
+
+### Producción
+- `react`
+- `react-dom`
+- `react-router-dom`
+- `lucide-react`
+
+### Desarrollo
+- `vite`
+- `typescript`
+- `@vitejs/plugin-react`
+- `eslint`
+- `tailwindcss`
+- `postcss`
+- `autoprefixer`
+
+## Ejecución del frontend
+Para arrancar el proyecto en modo desarrollo:
+
+```bash
+npm run dev
+```
+
+Esto levantará la app en modo Vite, normalmente en:
+- http://localhost:5173
+
+## Build de producción
+Para generar la versión lista para despliegue:
+
+```bash
+npm run build
+```
+
+Luego puedes previsualizarla con:
+
+```bash
+npm run preview
+```
+
+## Verificación rápida
+Si todo está bien, al ejecutar:
+
+```bash
+npm run dev
+```
+
+la terminal mostrará la URL local donde se está sirviendo la aplicación.
+
+## Solución rápida de problemas comunes
+- Si aparece error de módulos, ejecuta `npm install` otra vez.
+- Si hay conflictos de dependencias, borra la carpeta `node_modules` y vuelve a instalar.
+- Si el navegador no carga, revisa que Vite esté levantado en el puerto 5173.
+
+## Estructura del proyecto
+```text
+safevision-web/
+├── public/
+├── src/
+├── index.html
+├── package.json
+├── tsconfig.json
+├── vite.config.ts
+├── eslint.config.js
+└── README.md
+```
+
+Con estas instrucciones cualquier colaborador puede clonar el proyecto y ejecutar el frontend sin problemas en su entorno local.
+
