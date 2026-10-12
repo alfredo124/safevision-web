@@ -1,5 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, AlertTriangle, Maximize2, X, Camera } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Plus, Trash2, AlertTriangle, Maximize2, X } from 'lucide-react';
+import { authService } from '../../services/authService';
+
+const API_URL = 'http://localhost:8000';
+const cameraFeedUrl = (cameraId: string, token: string) =>
+  `${API_URL}/modules/ai_vision/video_feed/${cameraId.replace('cam-', '')}?token=${encodeURIComponent(token)}`;
 
 // 1. Interfaces y Tipos
 interface BoundingBox {
@@ -17,54 +22,26 @@ interface BoundingBox {
 interface CameraData {
   id: string;
   nombre: string;
-  streamUrl?: string;
-  mediaStream?: MediaStream; // Soporte para cámara nativa/webcam
   boxes: BoundingBox[];
 }
 
-const INFRACCIONES_CATALOGO = [
-  { tipo: 'Sin Casco', gravedad: 'Grave', consecuencia: 'Riesgo de traumatismo por caída de objetos', color: '#ef4444' },
-  { tipo: 'Sin Chaleco', gravedad: 'Moderada', consecuencia: 'Baja visibilidad en área de trabajo', color: '#f59e0b' },
-  { tipo: 'Sin Arnés', gravedad: 'Grave', consecuencia: 'Riesgo mortal de caída a distinto nivel', color: '#ef4444' },
-  { tipo: 'Sin Guantes', gravedad: 'Leve', consecuencia: 'Riesgo de abrasión o contacto con químicos', color: '#eab308' }
-];
+interface DetectionPayload {
+  name: string;
+  conf: number;
+  box: [number, number, number, number];
+}
 
-const generateRandomBoxes = (): BoundingBox[] => {
-  const getRandom = (min: number, max: number) => Math.floor(Math.random() * (max - min) + min);
-  const infr = INFRACCIONES_CATALOGO[Math.floor(Math.random() * INFRACCIONES_CATALOGO.length)];
+interface CameraApiResponse {
+  id: number;
+  name: string;
+  laboratory_type: 'QUIMICA' | 'FISICA';
+}
 
-  return [
-    {
-      id: 'box-person',
-      label: 'Persona',
-      color: '#10b981',
-      top: `${getRandom(10, 35)}%`,
-      left: `${getRandom(10, 30)}%`,
-      width: `${getRandom(15, 22)}%`,
-      height: `${getRandom(45, 60)}%`
-    },
-    {
-      id: 'box-correct',
-      label: 'EPP: Correcto',
-      color: '#10b981',
-      top: `${getRandom(15, 40)}%`,
-      left: `${getRandom(40, 60)}%`,
-      width: `${getRandom(12, 20)}%`,
-      height: `${getRandom(40, 55)}%`
-    },
-    {
-      id: 'box-incorrect',
-      label: `INFRACCIÓN: ${infr.tipo}`,
-      color: infr.color,
-      top: `${getRandom(20, 45)}%`,
-      left: `${getRandom(65, 80)}%`,
-      width: `${getRandom(14, 20)}%`,
-      height: `${getRandom(40, 50)}%`,
-      gravedad: infr.gravedad,
-      consecuencia: infr.consecuencia
-    }
-  ];
-};
+const mapCamera = (camera: CameraApiResponse): CameraData => ({
+  id: `cam-${camera.id}`,
+  nombre: camera.name,
+  boxes: []
+});
 
 const getSeverityStyles = (color: string) => {
   switch (color) {
@@ -99,25 +76,19 @@ function CameraCard({
   onDelete: (id: string, e: React.MouseEvent) => void; 
   onExpand: (id: string) => void;
 }) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [boxes, setBoxes] = useState<BoundingBox[]>(camera.boxes);
-
-  useEffect(() => {
-    if (camera.mediaStream && videoRef.current) {
-      videoRef.current.srcObject = camera.mediaStream;
-    }
-  }, [camera.mediaStream]);
+  const [boxes, setBoxes] = useState<BoundingBox[]>([]);
+  const token = authService.getCurrentUser()?.token;
 
   // WebSocket para metadata en tiempo real
   useEffect(() => {
-    if (!camera.mediaStream) {
-      const cameraId = camera.id.replace('cam-', '');
-      const socket = new WebSocket(`ws://localhost:8000/modules/ai_vision/ws/detections/${cameraId}`);
+    if (!token) return;
+    const cameraId = camera.id.replace('cam-', '');
+    const socket = new WebSocket(`ws://localhost:8000/modules/ai_vision/ws/detections/${cameraId}?token=${encodeURIComponent(token)}`);
       
       socket.onmessage = (event) => {
         try {
-          const detections = JSON.parse(event.data);
-          const newBoxes = detections.map((d: any, idx: number) => ({
+          const detections = JSON.parse(event.data) as DetectionPayload[];
+          const newBoxes = detections.map((d, idx) => ({
             id: `box-${idx}`,
             label: d.name,
             color: d.conf > 0.5 ? '#10b981' : '#ef4444',
@@ -127,13 +98,12 @@ function CameraCard({
             height: `${((d.box[3] - d.box[1]) / 480) * 100}%`
           }));
           setBoxes(newBoxes);
-        } catch (e) {
-          console.error("Error al procesar detecciones:", e);
+        } catch {
+          console.error("Error al procesar detecciones");
         }
       };
-      return () => socket.close();
-    }
-  }, [camera.id, camera.mediaStream]);
+    return () => socket.close();
+  }, [camera.id, token]);
 
   return (
     <div 
@@ -142,6 +112,7 @@ function CameraCard({
     >
       <div className="absolute top-2 left-2 z-10 bg-black/70 backdrop-blur-md text-xs px-2.5 py-1 rounded text-white font-semibold border border-gray-700 flex items-center gap-2">
         <span>{camera.nombre}</span>
+        <span>{boxes.length} detecciones</span>
       </div>
 
       <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -162,68 +133,58 @@ function CameraCard({
       </div>
 
       <div className="relative flex-1 bg-[#1a1a1a] flex items-center justify-center overflow-hidden min-h-[220px]">
-                {camera.mediaStream ? (
-          <video 
-            ref={videoRef}
-            autoPlay 
-            playsInline 
-            muted 
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <img 
-            src={`http://localhost:8000/modules/ai_vision/video_feed/${camera.id.replace('cam-', '')}`} 
-            alt={camera.nombre} 
-            className="w-full h-full object-cover opacity-75" 
-          />
-        )}
+        <img 
+          src={token ? cameraFeedUrl(camera.id, token) : undefined}
+          alt={camera.nombre} 
+          className="w-full h-full object-cover opacity-75" 
+        />
       </div>
     </div>
   );
 }
 
 export function MonitoreoPage() {
-  const [cameras, setCameras] = useState<CameraData[]>([
-    {
-      id: 'cam-1',
-      nombre: 'CAM-01: Taller de Soldadura',
-      streamUrl: 'https://images.unsplash.com/photo-1581092335397-9583fe92d232?q=80&w=1000&auto=format&fit=crop',
-      boxes: generateRandomBoxes()
-    },
-    {
-      id: 'cam-2',
-      nombre: 'CAM-02: Lab. de Química',
-      streamUrl: 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?q=80&w=1000&auto=format&fit=crop',
-      boxes: generateRandomBoxes()
-    }
-  ]);
+  const session = authService.getCurrentUser();
+  const token = session?.token ?? '';
+  const isAdministrator = session?.role === 'ADMINISTRADOR';
+  const defaultLaboratory = session?.role === 'ENCARGADO_FISICA' ? 'FISICA' : 'QUIMICA';
+  const [cameras, setCameras] = useState<CameraData[]>([]);
+  const [isLoadingCameras, setIsLoadingCameras] = useState(true);
+  const [isCameraFormOpen, setIsCameraFormOpen] = useState(false);
+  const [isSubmittingCamera, setIsSubmittingCamera] = useState(false);
+  const [cameraName, setCameraName] = useState('');
+  const [laboratoryType, setLaboratoryType] = useState<'QUIMICA' | 'FISICA'>(defaultLaboratory);
+  const [cameraUrl, setCameraUrl] = useState('');
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [cameraError, setCameraError] = useState('');
 
   const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
-  const [availableDevice, setAvailableDevice] = useState<MediaDeviceInfo | null>(null);
-  const modalVideoRef = useRef<HTMLVideoElement | null>(null);
 
-  // Escanear dispositivos multimedia conectados para detectar cámara web/laptop disponible
   useEffect(() => {
-    async function checkAvailableCameras() {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
-
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter((device) => device.kind === 'videoinput');
-        
-        // Verificar si alguna cámara detectada ya fue agregada
-        const unaddedDevice = videoDevices.find(
-          (dev) => !cameras.some((cam) => cam.id === dev.deviceId || cam.id === 'native-webcam')
-        );
-
-        setAvailableDevice(unaddedDevice || null);
-      } catch (error) {
-        console.error('Error al detectar dispositivos de video:', error);
-      }
+    if (!token) {
+      setIsLoadingCameras(false);
+      setCameraError('Inicia sesión para consultar las cámaras.');
+      return;
     }
 
-    checkAvailableCameras();
-  }, [cameras]);
+    const loadCameras = async () => {
+      try {
+        const response = await fetch(`${API_URL}/modules/ai_vision/cameras`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!response.ok) throw new Error('No se pudieron cargar las cámaras.');
+        const data = await response.json() as CameraApiResponse[];
+        setCameras(data.map(mapCamera));
+        setCameraError('');
+      } catch (error) {
+        setCameraError(error instanceof Error ? error.message : 'Error al conectar con el backend.');
+      } finally {
+        setIsLoadingCameras(false);
+      }
+    };
+
+    void loadCameras();
+  }, [token]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -233,48 +194,64 @@ export function MonitoreoPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Agregar cámara simulada o remota por defecto
-  const handleAddCamera = () => {
-    const nextId = cameras.length + 1;
-    const newCam: CameraData = {
-      id: `cam-${Date.now()}`,
-      nombre: `CAM-0${nextId}: Nuevo Laboratorio`,
-      streamUrl: 'https://images.unsplash.com/photo-1504307651254-35680f356dfd?q=80&w=1000&auto=format&fit=crop',
-      boxes: generateRandomBoxes()
-    };
-    setCameras([...cameras, newCam]);
-  };
+  const handleSubmitCamera = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setCameraError('');
+    if (!cameraName.trim()) {
+      setCameraError('Escribe un nombre para la cámara.');
+      return;
+    }
+    if (Boolean(cameraUrl.trim()) === Boolean(videoFile)) {
+      setCameraError('Indica una URL de cámara o selecciona un video.');
+      return;
+    }
 
-  // Agregar la cámara física/laptop detectada
-  const handleAddNativeWebcam = async () => {
+    const formData = new FormData();
+    formData.append('name', cameraName.trim());
+    formData.append('laboratory_type', laboratoryType);
+    if (videoFile) formData.append('video', videoFile);
+    else formData.append('stream_url', cameraUrl.trim());
+
+    setIsSubmittingCamera(true);
     try {
-      const constraints: MediaStreamConstraints = availableDevice?.deviceId
-        ? { video: { deviceId: { exact: availableDevice.deviceId } } }
-        : { video: true };
+      const response = await fetch(`${API_URL}/modules/ai_vision/cameras/upload`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || 'No se pudo registrar la cámara.');
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      const nextId = cameras.length + 1;
-
-      const newCam: CameraData = {
-        id: availableDevice?.deviceId || 'native-webcam',
-        nombre: availableDevice?.label || `CAM-0${nextId}: Cámara Local/Laptop`,
-        mediaStream: stream,
-        boxes: generateRandomBoxes()
-      };
-
-      setCameras([...cameras, newCam]);
-      setAvailableDevice(null);
-    } catch (err) {
-      alert('No se pudo acceder a la cámara. Por favor permite los permisos en el navegador.');
+      setCameras((current) => [...current, mapCamera(result as CameraApiResponse)]);
+      setCameraName('');
+      setCameraUrl('');
+      setVideoFile(null);
+      setIsCameraFormOpen(false);
+    } catch (error) {
+      setCameraError(error instanceof Error ? error.message : 'Error al conectar con el backend.');
+    } finally {
+      setIsSubmittingCamera(false);
     }
   };
 
-  const handleDeleteCamera = (id: string, e: React.MouseEvent) => {
+  const handleDeleteCamera = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const camToDelete = cameras.find((c) => c.id === id);
-    if (camToDelete?.mediaStream) {
-      camToDelete.mediaStream.getTracks().forEach((track) => track.stop());
+    if (/^cam-\d+$/.test(id)) {
+      try {
+        const response = await fetch(`${API_URL}/modules/ai_vision/cameras/${id.replace('cam-', '')}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!response.ok) {
+          const result = await response.json();
+          throw new Error(result.detail || 'No se pudo eliminar la cámara.');
+        }
+      } catch (error) {
+        setCameraError(error instanceof Error ? error.message : 'Error al eliminar la cámara.');
+        return;
+      }
     }
+
     setCameras(cameras.filter((cam) => cam.id !== id));
     if (selectedCameraId === id) setSelectedCameraId(null);
   };
@@ -287,12 +264,6 @@ export function MonitoreoPage() {
   const totalGraves = activeInfracciones.filter((i) => i.color === '#ef4444').length;
   const totalModeradas = activeInfracciones.filter((i) => i.color === '#f59e0b').length;
   const totalLeves = activeInfracciones.filter((i) => i.color === '#eab308').length;
-
-  useEffect(() => {
-    if (selectedCamera?.mediaStream && modalVideoRef.current) {
-      modalVideoRef.current.srcObject = selectedCamera.mediaStream;
-    }
-  }, [selectedCamera]);
 
   return (
     <div className="relative flex flex-1 h-full overflow-hidden">
@@ -378,6 +349,14 @@ export function MonitoreoPage() {
 
       {/* Grid de Cámaras */}
       <div className="flex-1 p-3 grid grid-cols-2 auto-rows-fr gap-3 bg-[#0d0e12] w-full h-full overflow-y-auto">
+        {isLoadingCameras && (
+          <div className="col-span-full text-sm text-gray-400">Cargando cámaras...</div>
+        )}
+        {cameraError && (
+          <div role="alert" className="col-span-full rounded border border-red-900 bg-red-950/40 px-3 py-2 text-sm text-red-300">
+            {cameraError}
+          </div>
+        )}
         {cameras.map((camera) => (
           <CameraCard 
             key={camera.id} 
@@ -389,32 +368,87 @@ export function MonitoreoPage() {
 
         {/* Tarjeta Dinámica de Opción de Agregar Cámara */}
         <div className="border-2 border-dashed border-gray-800 bg-[#12141a]/50 rounded p-4 flex flex-col items-center justify-center gap-3 min-h-[220px]">
-          {availableDevice ? (
-            <button
-              onClick={handleAddNativeWebcam}
-              className="w-full h-full flex flex-col items-center justify-center gap-2 bg-emerald-950/20 border border-emerald-500/40 hover:border-emerald-500 text-emerald-400 hover:bg-emerald-950/40 rounded transition-all p-4 group"
-            >
-              <div className="p-3 rounded-full bg-emerald-900/50 border border-emerald-500/50 group-hover:scale-110 transition-transform">
-                <Camera className="w-6 h-6 text-emerald-400" />
-              </div>
-              <span className="text-xs font-bold uppercase tracking-wider text-center">
-                Cámara Detectada ({availableDevice.label || 'Laptop/USB'})
-              </span>
-              <span className="text-[10px] text-emerald-300/80">Haz clic para integrar el video en vivo</span>
-            </button>
-          ) : (
-            <button
-              onClick={handleAddCamera}
-              className="w-full h-full flex flex-col items-center justify-center gap-2 text-gray-500 hover:text-emerald-400 transition-all group"
-            >
-              <div className="p-3 rounded-full bg-gray-900 border border-gray-800 group-hover:border-emerald-500/40 group-hover:scale-110 transition-transform">
-                <Plus className="w-8 h-8" />
-              </div>
-              <span className="text-xs font-semibold uppercase tracking-wider">Agregar Nueva Cámara</span>
-            </button>
-          )}
+          <button
+            onClick={() => { setCameraError(''); setIsCameraFormOpen(true); }}
+            className="w-full flex flex-col items-center justify-center gap-2 text-gray-400 hover:text-emerald-400 transition-all group"
+          >
+            <div className="p-3 rounded-full bg-gray-900 border border-gray-800 group-hover:border-emerald-500/40 group-hover:scale-110 transition-transform">
+              <Plus className="w-8 h-8" />
+            </div>
+            <span className="text-xs font-semibold uppercase tracking-wider">Agregar Nueva Cámara</span>
+          </button>
         </div>
       </div>
+
+      {isCameraFormOpen && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/75 p-4">
+          <form onSubmit={handleSubmitCamera} className="w-full max-w-lg space-y-4 rounded border border-gray-700 bg-[#16181e] p-5 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-bold uppercase tracking-wider text-white">Registrar cámara</h2>
+              <button type="button" onClick={() => setIsCameraFormOpen(false)} className="text-gray-400 hover:text-white" aria-label="Cerrar formulario">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <label className="block space-y-1.5 text-xs text-gray-300">
+              <span>Nombre</span>
+              <input
+                required
+                maxLength={120}
+                value={cameraName}
+                onChange={(event) => setCameraName(event.target.value)}
+                className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white outline-none focus:border-emerald-500"
+                placeholder="Ej. Cámara laboratorio de química"
+              />
+            </label>
+
+            <label className="block space-y-1.5 text-xs text-gray-300">
+              <span>Área de laboratorio</span>
+              <select
+                value={laboratoryType}
+                disabled={!isAdministrator}
+                onChange={(event) => setLaboratoryType(event.target.value as 'QUIMICA' | 'FISICA')}
+                className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white outline-none focus:border-emerald-500 disabled:opacity-70"
+              >
+                <option value="QUIMICA">Química</option>
+                <option value="FISICA">Física</option>
+              </select>
+            </label>
+
+            <label className="block space-y-1.5 text-xs text-gray-300">
+              <span>URL de cámara (RTSP/HTTP)</span>
+              <input
+                value={cameraUrl}
+                onChange={(event) => { setCameraUrl(event.target.value); if (event.target.value) setVideoFile(null); }}
+                className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white outline-none focus:border-emerald-500"
+                placeholder="rtsp://usuario:clave@servidor:554/stream"
+              />
+            </label>
+
+            <label className="block space-y-1.5 text-xs text-gray-300">
+              <span>O carga un video para reproducirlo como cámara (máximo 500 MB)</span>
+              <input
+                type="file"
+                accept="video/mp4,video/avi,video/quicktime,video/x-matroska,video/webm,.avi,.mkv"
+                onChange={(event) => { const file = event.target.files?.[0] ?? null; setVideoFile(file); if (file) setCameraUrl(''); }}
+                className="block w-full text-xs text-gray-400 file:mr-3 file:rounded file:border-0 file:bg-gray-800 file:px-3 file:py-2 file:text-xs file:text-gray-200 hover:file:bg-gray-700"
+              />
+              {videoFile && <span className="block text-emerald-400">{videoFile.name}</span>}
+            </label>
+
+            {cameraError && <p role="alert" className="text-sm text-red-300">{cameraError}</p>}
+
+            <div className="flex justify-end gap-2 border-t border-gray-800 pt-3">
+              <button type="button" onClick={() => setIsCameraFormOpen(false)} className="rounded border border-gray-700 px-3 py-2 text-xs text-gray-300 hover:bg-gray-800">
+                Cancelar
+              </button>
+              <button type="submit" disabled={isSubmittingCamera} className="rounded bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:cursor-wait disabled:opacity-60">
+                {isSubmittingCamera ? 'Guardando...' : 'Guardar cámara'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* MODAL / PANTALLA COMPLETA */}
       {selectedCamera && (
@@ -434,21 +468,11 @@ export function MonitoreoPage() {
           </div>
 
                     <div className="relative flex-1 bg-black rounded border border-gray-800 overflow-hidden flex items-center justify-center">
-            {selectedCamera.mediaStream ? (
-              <video 
-                ref={modalVideoRef}
-                autoPlay 
-                playsInline 
-                muted 
-                className="w-full h-full object-contain"
-              />
-            ) : (
-              <img 
-                src={`http://localhost:8000/modules/ai_vision/video_feed/${selectedCamera.id.replace('cam-', '')}`} 
-                alt={selectedCamera.nombre} 
-                className="w-full h-full object-contain" 
-              />
-            )}
+            <img 
+              src={cameraFeedUrl(selectedCamera.id, token)}
+              alt={selectedCamera.nombre} 
+              className="w-full h-full object-contain" 
+            />
           </div>
         </div>
       )}
