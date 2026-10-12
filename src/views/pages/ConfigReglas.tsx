@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Shield, Camera, Check, AlertCircle, AlertTriangle, 
   Plus, Trash2, FileCode, PlusCircle, X 
 } from 'lucide-react';
+import { authService } from '../../services/authService';
+import { reglasLabService, type CameraSummary, type LaboratoryType, type RulesConfiguration, type SafetyEquipment, type Workshop } from '../../services/reglasLabService';
 
 interface EPPItem {
   id: string;
@@ -15,51 +17,49 @@ interface EPPItem {
 }
 
 interface AmbienteConfig {
-  id: string;
+  id: number;
   nombre: string;
-  camaras: string[];
+  laboratoryType: LaboratoryType;
+  camaras: CameraSummary[];
   eppRequerido: Record<string, boolean>;
 }
 
-// Catálogo Global de Cámaras disponibles en el sistema
-const CAMARAS_DISPONIBLES_GLOBAL = [
-  'CAM-01: Soldadura Norte',
-  'CAM-02: Mesada Principal',
-  'CAM-03: Soldadura Sur',
-  'CAM-04: Almacén de Reactivos',
-  'CAM-05: Zona de Maquinaria Heavy',
-  'CAM-06: Pasillo Principal Lab',
-];
+const mapEquipment = (item: SafetyEquipment): EPPItem => ({
+  id: item.id,
+  nombre: item.name,
+  slot: item.slot as EPPItem['slot'],
+  icono: item.icon,
+  codigoFalta: item.missing_code,
+  descripcionFalta: item.missing_description,
+  impacto: item.impact,
+});
 
-const EPP_CATALOGO_INICIAL: EPPItem[] = [
-  { id: 'casco', nombre: 'Casco de Seguridad', slot: 'cabeza', icono: '🪖', codigoFalta: 'ERR-EPP-01', descripcionFalta: 'Ausencia de casco en zona de riesgo de caída de objetos', impacto: 'CRÍTICO' },
-  { id: 'lentes', nombre: 'Lentes de Protección', slot: 'ojos', icono: '🥽', codigoFalta: 'ERR-EPP-02', descripcionFalta: 'Uso omitido o inadecuado de lentes protectores antiproyección', impacto: 'ALTO' },
-  { id: 'chaleco', nombre: 'Chaleco / Mandil', slot: 'cuerpo', icono: '🦺', codigoFalta: 'ERR-EPP-03', descripcionFalta: 'Falta de indumentaria de alta visibilidad o mandil protector', impacto: 'MEDIO' },
-  { id: 'arnes', nombre: 'Arnés anticaídas', slot: 'cuerpo', icono: '🪢', codigoFalta: 'ERR-EPP-04', descripcionFalta: 'Operación en altura sin línea de vida o arnés normado', impacto: 'CRÍTICO' },
-  { id: 'guantes', nombre: 'Guantes Industriales', slot: 'manos', icono: '🧤', codigoFalta: 'ERR-EPP-05', descripcionFalta: 'Manipulación de insumos químicos/térmicos sin guantes', impacto: 'ALTO' },
-  { id: 'botas', nombre: 'Botas de Seguridad', slot: 'pies', icono: '🥾', codigoFalta: 'ERR-EPP-06', descripcionFalta: 'Ingreso con calzado no normado o punta de acero', impacto: 'MEDIO' },
-];
+const mapWorkshop = (workshop: Workshop): AmbienteConfig => ({
+  id: workshop.id,
+  nombre: workshop.name,
+  laboratoryType: workshop.laboratory_type,
+  camaras: workshop.cameras,
+  eppRequerido: Object.fromEntries(workshop.required_equipment_ids.map((id) => [id, true])),
+});
+
+const mapConfiguration = (configuration: RulesConfiguration) => ({
+  workshops: configuration.workshops.map(mapWorkshop),
+  catalog: configuration.catalog.map(mapEquipment),
+});
 
 export function ConfigReglasPage() {
-  const [eppCatalogo, setEppCatalogo] = useState<EPPItem[]>(EPP_CATALOGO_INICIAL);
-  const [ambientes, setAmbientes] = useState<AmbienteConfig[]>([
-    {
-      id: 'env-1',
-      nombre: 'Taller de Soldadura',
-      camaras: ['CAM-01: Soldadura Norte', 'CAM-03: Soldadura Sur'],
-      eppRequerido: { casco: true, lentes: true, chaleco: true, guantes: true, botas: true, arnes: false }
-    },
-    {
-      id: 'env-2',
-      nombre: 'Laboratorio de Química',
-      camaras: ['CAM-02: Mesada Principal'],
-      eppRequerido: { casco: false, lentes: true, chaleco: true, guantes: true, botas: true, arnes: false }
-    }
-  ]);
-
-  const [selectedAmbienteId, setSelectedAmbienteId] = useState<string>('env-1');
+  const [eppCatalogo, setEppCatalogo] = useState<EPPItem[]>([]);
+  const [ambientes, setAmbientes] = useState<AmbienteConfig[]>([]);
+  const [availableCameras, setAvailableCameras] = useState<CameraSummary[]>([]);
+  const [selectedAmbienteId, setSelectedAmbienteId] = useState<number | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState('');
   const [showAddCamMenu, setShowAddCamMenu] = useState<boolean>(false);
   const [showAddRuleModal, setShowAddRuleModal] = useState<boolean>(false);
+  const [showAddWorkshopModal, setShowAddWorkshopModal] = useState(false);
+  const [newWorkshopName, setNewWorkshopName] = useState('');
+  const [newWorkshopArea, setNewWorkshopArea] = useState<LaboratoryType>('QUIMICA');
 
   // Formulario de Nueva Regla
   const [nuevaRegla, setNuevaRegla] = useState({
@@ -70,49 +70,107 @@ export function ConfigReglasPage() {
     impacto: 'MEDIO' as EPPItem['impacto']
   });
 
-  const activeAmbiente = ambientes.find((a) => a.id === selectedAmbienteId) || ambientes[0];
+  const activeAmbiente = ambientes.find((a) => a.id === selectedAmbienteId) ?? ambientes[0];
+  const currentUser = authService.getCurrentUser();
+  const canCreateWorkshops = currentUser?.role === 'ADMINISTRADOR';
+  const camarasSinAsignar = activeAmbiente
+    ? availableCameras.filter(camera => camera.laboratory_type === activeAmbiente.laboratoryType)
+    : [];
 
-  // Obtener cámaras no asignadas a NINGÚN ambiente o al ambiente actual
-  const camarasAsignadasEnTodos = ambientes.flatMap(a => a.camaras);
-  const camarasSinAsignar = CAMARAS_DISPONIBLES_GLOBAL.filter(c => !camarasAsignadasEnTodos.includes(c));
+  const loadConfiguration = async () => {
+    const configuration = await reglasLabService.getConfiguration();
+    const mapped = mapConfiguration(configuration);
+    setAmbientes(mapped.workshops);
+    setEppCatalogo(mapped.catalog);
+    setAvailableCameras(configuration.available_cameras);
+    setSelectedAmbienteId(current => mapped.workshops.some(workshop => workshop.id === current)
+      ? current
+      : mapped.workshops[0]?.id ?? null);
+  };
 
-  // Asignar Cámara
-  const handleAddCamara = (camaraNombre: string) => {
-    setAmbientes(prev => prev.map(amb => {
-      if (amb.id !== selectedAmbienteId) return amb;
-      return { ...amb, camaras: [...amb.camaras, camaraNombre] };
-    }));
+  useEffect(() => {
+    let isCurrent = true;
+    const load = async () => {
+      try {
+        const configuration = await reglasLabService.getConfiguration();
+        if (!isCurrent) return;
+        const mapped = mapConfiguration(configuration);
+        setAmbientes(mapped.workshops);
+        setEppCatalogo(mapped.catalog);
+        setAvailableCameras(configuration.available_cameras);
+        setSelectedAmbienteId(mapped.workshops[0]?.id ?? null);
+      } catch (reason) {
+        if (isCurrent) setError(reason instanceof Error ? reason.message : 'No se pudo cargar la configuración.');
+      } finally {
+        if (isCurrent) setIsLoading(false);
+      }
+    };
+    void load();
+    return () => { isCurrent = false; };
+  }, []);
+
+  const saveWorkshopConfiguration = async (cameraIds: number[], requiredEquipmentIds: string[]) => {
+    if (!activeAmbiente) return;
+    setIsSaving(true);
+    setError('');
+    try {
+      await reglasLabService.saveWorkshopConfiguration(activeAmbiente.id, {
+        camera_ids: cameraIds,
+        required_equipment_ids: requiredEquipmentIds,
+      });
+      await loadConfiguration();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No se pudo guardar la configuración.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleAddCamara = (cameraId: number) => {
+    if (!activeAmbiente) return;
+    void saveWorkshopConfiguration(
+      [...activeAmbiente.camaras.map(camera => camera.id), cameraId],
+      Object.keys(activeAmbiente.eppRequerido).filter(id => activeAmbiente.eppRequerido[id]),
+    );
     setShowAddCamMenu(false);
   };
 
-  // Desasignar Cámara
-  const handleRemoveCamara = (camaraNombre: string) => {
-    setAmbientes(prev => prev.map(amb => {
-      if (amb.id !== selectedAmbienteId) return amb;
-      return { ...amb, camaras: amb.camaras.filter(c => c !== camaraNombre) };
-    }));
-  };
-
-  const toggleEPP = (eppId: string) => {
-    setAmbientes((prev) =>
-      prev.map((amb) => {
-        if (amb.id !== selectedAmbienteId) return amb;
-        return {
-          ...amb,
-          eppRequerido: {
-            ...amb.eppRequerido,
-            [eppId]: !amb.eppRequerido[eppId]
-          }
-        };
-      })
+  const handleRemoveCamara = (cameraId: number) => {
+    if (!activeAmbiente) return;
+    void saveWorkshopConfiguration(
+      activeAmbiente.camaras.filter(camera => camera.id !== cameraId).map(camera => camera.id),
+      Object.keys(activeAmbiente.eppRequerido).filter(id => activeAmbiente.eppRequerido[id]),
     );
   };
 
-  // Cargar Protocolo de Seguridad (Simulación de exportación a Python)
+  const toggleEPP = (eppId: string) => {
+    if (!activeAmbiente) return;
+    const required = Object.keys(activeAmbiente.eppRequerido)
+      .filter(id => activeAmbiente.eppRequerido[id] && id !== eppId);
+    if (!activeAmbiente.eppRequerido[eppId]) required.push(eppId);
+    void saveWorkshopConfiguration(activeAmbiente.camaras.map(camera => camera.id), required);
+  };
+
+  const handleCreateWorkshop = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError('');
+    try {
+      const workshop = await reglasLabService.createWorkshop({ name: newWorkshopName.trim(), laboratory_type: newWorkshopArea });
+      await loadConfiguration();
+      setSelectedAmbienteId(workshop.id);
+      setNewWorkshopName('');
+      setShowAddWorkshopModal(false);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No se pudo crear el taller.');
+    }
+  };
+
   const handleCargarProtocoloPython = () => {
+    if (!activeAmbiente) return;
     const configExport = {
       ambiente: activeAmbiente.nombre,
-      camaras_rtsp: activeAmbiente.camaras,
+      laboratorio: activeAmbiente.laboratoryType,
+      camaras: activeAmbiente.camaras.map(camera => ({ id: camera.id, nombre: camera.name })),
       reglas_activas: eppCatalogo.filter(item => activeAmbiente.eppRequerido[item.id]).map(item => ({
         codigo: item.codigoFalta,
         epp: item.nombre,
@@ -120,44 +178,82 @@ export function ConfigReglasPage() {
         descripcion: item.descripcionFalta
       }))
     };
-    
-    console.log("Generando Script/Protocolo Python:", configExport);
-    alert(`Protocolo de Seguridad generado con éxito para Python (${activeAmbiente.nombre}).\nCámaras vinculadas: ${activeAmbiente.camaras.length}`);
+    const url = URL.createObjectURL(new Blob([JSON.stringify(configExport, null, 2)], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `protocolo-${activeAmbiente.nombre.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
-  // Agregar Nueva Regla / Categoría por el Administrador
-  const handleCrearNuevaRegla = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!nuevaRegla.nombre || !nuevaRegla.codigoFalta) return;
-
+  const handleCrearNuevaRegla = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!nuevaRegla.nombre.trim() || !nuevaRegla.codigoFalta.trim()) return;
     const newId = `custom-${Date.now()}`;
-    const nuevoItem: EPPItem = {
-      id: newId,
-      nombre: nuevaRegla.nombre,
-      slot: nuevaRegla.slot,
-      icono: '🛡️',
-      codigoFalta: nuevaRegla.codigoFalta,
-      descripcionFalta: nuevaRegla.descripcionFalta,
-      impacto: nuevaRegla.impacto
-    };
-
-    setEppCatalogo(prev => [...prev, nuevoItem]);
-    // Activar por defecto en el ambiente actual
-    toggleEPP(newId);
-    setShowAddRuleModal(false);
-    setNuevaRegla({ nombre: '', slot: 'cabeza', codigoFalta: '', descripcionFalta: '', impacto: 'MEDIO' });
+    setError('');
+    try {
+      const equipment = await reglasLabService.createEquipment({
+        id: newId,
+        name: nuevaRegla.nombre.trim(),
+        slot: nuevaRegla.slot,
+        icon: '🛡️',
+        missing_code: nuevaRegla.codigoFalta.trim(),
+        missing_description: nuevaRegla.descripcionFalta.trim() || nuevaRegla.nombre.trim(),
+        impact: nuevaRegla.impacto,
+        model_class: null,
+      });
+      setEppCatalogo(current => [...current, mapEquipment(equipment)]);
+      if (activeAmbiente) {
+        await saveWorkshopConfiguration(
+          activeAmbiente.camaras.map(camera => camera.id),
+          [...Object.keys(activeAmbiente.eppRequerido).filter(id => activeAmbiente.eppRequerido[id]), newId],
+        );
+      }
+      setShowAddRuleModal(false);
+      setNuevaRegla({ nombre: '', slot: 'cabeza', codigoFalta: '', descripcionFalta: '', impacto: 'MEDIO' });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No se pudo crear el equipo de seguridad.');
+    }
   };
+
+  if (isLoading) {
+    return <div className="flex flex-1 items-center justify-center bg-[#0d0e12] text-sm text-gray-400">Cargando reglas del laboratorio...</div>;
+  }
+
+  if (!activeAmbiente) {
+    return (
+      <main className="flex flex-1 flex-col items-center justify-center gap-4 bg-[#0d0e12] p-6 text-white">
+        <Shield className="h-8 w-8 text-emerald-400" />
+        <h1 className="text-lg font-bold">No hay talleres configurados</h1>
+        <p className="text-sm text-gray-400">Crea un taller para asignar cámaras reales y definir el EPP obligatorio.</p>
+        {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
+        {canCreateWorkshops && (
+          <form onSubmit={handleCreateWorkshop} className="flex flex-wrap items-center justify-center gap-2">
+            <input required value={newWorkshopName} onChange={event => setNewWorkshopName(event.target.value)} className="rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm" placeholder="Nombre del taller" />
+            <select value={newWorkshopArea} onChange={event => setNewWorkshopArea(event.target.value as LaboratoryType)} className="rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm">
+              <option value="QUIMICA">Química</option>
+              <option value="FISICA">Física</option>
+            </select>
+            <button disabled={isSaving} className="rounded bg-emerald-600 px-3 py-2 text-sm font-semibold disabled:opacity-50">Crear taller</button>
+          </form>
+        )}
+      </main>
+    );
+  }
 
   return (
     <div className="flex flex-1 h-full bg-[#0d0e12] text-white overflow-hidden">
       {/* 1. Panel Izquierdo: Selección de Ambientes */}
       <aside className="w-80 border-r border-gray-800 bg-[#16181e] p-4 flex flex-col justify-between shrink-0">
         <div className="space-y-4">
-          <div className="flex items-center gap-2 mb-2">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
             <Shield className="w-5 h-5 text-emerald-400" />
             <h2 className="text-xs font-bold text-gray-300 uppercase tracking-wider">
-              Ambientes Configurados
+              Talleres Configurados
             </h2>
+            </div>
+            {canCreateWorkshops && <button onClick={() => setShowAddWorkshopModal(true)} className="rounded border border-gray-700 p-1.5 text-emerald-400 hover:bg-gray-800" title="Crear taller"><Plus className="h-4 w-4" /></button>}
           </div>
 
           <div className="space-y-2">
@@ -179,14 +275,14 @@ export function ConfigReglasPage() {
                 </div>
                 <div className="text-[11px] text-gray-400 flex items-center gap-1">
                   <Camera className="w-3 h-3 text-gray-500" />
-                  <span className="truncate">{amb.camaras.join(', ') || 'Sin cámaras'}</span>
+                  <span className="truncate">{amb.camaras.map(camera => camera.name).join(', ') || 'Sin cámaras'}</span>
                 </div>
               </button>
             ))}
           </div>
         </div>
 
-        <div className="p-3 bg-gray-900/80 border border-gray-800 rounded text-xs text-gray-400 space-y-1">
+        <div className="space-y-1 rounded border border-gray-800 bg-gray-900/80 p-3 text-xs text-gray-400">
           <p className="flex items-center gap-1 font-semibold text-gray-300">
             <AlertCircle className="w-3.5 h-3.5 text-indigo-400" /> Regla de Heredado:
           </p>
@@ -203,10 +299,10 @@ export function ConfigReglasPage() {
         <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-gray-800 pb-4 gap-4">
           <div>
             <h1 className="text-xl font-bold text-white uppercase tracking-wide">
-              Área: <span className="text-emerald-400">{activeAmbiente.nombre}</span>
+              Taller: <span className="text-emerald-400">{activeAmbiente.nombre}</span>
             </h1>
             <p className="text-xs text-gray-400 mt-0.5">
-              Gestión de dispositivos de visión artificial y reglas normativas.
+              {activeAmbiente.laboratoryType === 'QUIMICA' ? 'Química' : 'Física'} · Gestión de cámaras y EPP obligatorio.
             </p>
           </div>
 
@@ -218,6 +314,9 @@ export function ConfigReglasPage() {
             <span>Cargar Protocolo de Seguridad (Python)</span>
           </button>
         </div>
+
+        {error && <p role="alert" className="rounded border border-red-900 bg-red-950/30 px-3 py-2 text-sm text-red-300">{error}</p>}
+        {isSaving && <p className="text-xs text-emerald-400">Guardando cambios...</p>}
 
         {/* SECCIÓN 1: Gestión y Asignación de Cámaras por Área */}
         <div className="bg-[#16181e] border border-gray-800 rounded-lg p-4 space-y-3">
@@ -231,6 +330,7 @@ export function ConfigReglasPage() {
             <div className="relative">
               <button
                 onClick={() => setShowAddCamMenu(!showAddCamMenu)}
+                disabled={isSaving}
                 className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded text-xs font-bold transition-colors"
               >
                 <Plus className="w-3.5 h-3.5" />
@@ -245,11 +345,11 @@ export function ConfigReglasPage() {
                   ) : (
                     camarasSinAsignar.map(cam => (
                       <button
-                        key={cam}
-                        onClick={() => handleAddCamara(cam)}
+                        key={cam.id}
+                        onClick={() => handleAddCamara(cam.id)}
                         className="w-full text-left text-xs p-2 text-gray-200 hover:bg-gray-800 rounded transition-colors flex justify-between items-center"
                       >
-                        <span>{cam}</span>
+                        <span>{cam.name}</span>
                         <Plus className="w-3 h-3 text-emerald-400" />
                       </button>
                     ))
@@ -278,16 +378,17 @@ export function ConfigReglasPage() {
                   </tr>
                 ) : (
                   activeAmbiente.camaras.map((cam) => (
-                    <tr key={cam} className="hover:bg-gray-900/40">
-                      <td className="p-2 font-semibold text-gray-200">{cam}</td>
+                    <tr key={cam.id} className="hover:bg-gray-900/40">
+                      <td className="p-2 font-semibold text-gray-200">{cam.name}</td>
                       <td className="p-2">
-                        <span className="bg-emerald-950/80 text-emerald-400 border border-emerald-500/30 text-[9px] px-2 py-0.5 rounded font-bold">
-                          ONLINE (RTSP)
+                        <span className={`rounded border px-2 py-0.5 text-[9px] font-bold ${cam.status === 'online' ? 'border-emerald-500/30 bg-emerald-950/80 text-emerald-400' : 'border-gray-700 bg-gray-900 text-gray-400'}`}>
+                          {cam.status.toUpperCase()}
                         </span>
                       </td>
                       <td className="p-2 text-right">
                         <button
-                          onClick={() => handleRemoveCamara(cam)}
+                          onClick={() => handleRemoveCamara(cam.id)}
+                          disabled={isSaving}
                           className="text-red-400 hover:text-red-300 p-1 rounded hover:bg-red-950/30 transition-colors"
                           title="Desasignar Cámara"
                         >
@@ -349,13 +450,13 @@ export function ConfigReglasPage() {
             </h3>
             
             {/* Espacio Libre Admin: Botón Agregar Regla Adicional */}
-            <button
+            {canCreateWorkshops && <button
               onClick={() => setShowAddRuleModal(true)}
               className="flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded text-xs font-bold transition-colors"
             >
               <PlusCircle className="w-3.5 h-3.5" />
               <span>Agregar Regla / Categoría</span>
-            </button>
+            </button>}
           </div>
 
           <div className="overflow-x-auto">
@@ -479,6 +580,29 @@ export function ConfigReglasPage() {
               </button>
             </form>
           </div>
+        </div>
+      )}
+      {showAddWorkshopModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <form onSubmit={handleCreateWorkshop} className="w-full max-w-md space-y-4 rounded-lg border border-gray-700 bg-[#16181e] p-5">
+            <div className="flex items-center justify-between border-b border-gray-800 pb-2">
+              <h3 className="text-sm font-bold text-white">Crear taller</h3>
+              <button type="button" onClick={() => setShowAddWorkshopModal(false)} className="text-gray-400 hover:text-white" aria-label="Cerrar"><X className="h-4 w-4" /></button>
+            </div>
+            <label className="block space-y-1 text-xs text-gray-400">
+              <span>Nombre</span>
+              <input required maxLength={120} value={newWorkshopName} onChange={event => setNewWorkshopName(event.target.value)} className="w-full rounded border border-gray-700 bg-gray-900 p-2 text-white" placeholder="Ej. Taller de Soldadura" />
+            </label>
+            <label className="block space-y-1 text-xs text-gray-400">
+              <span>Área</span>
+              <select value={newWorkshopArea} onChange={event => setNewWorkshopArea(event.target.value as LaboratoryType)} className="w-full rounded border border-gray-700 bg-gray-900 p-2 text-white">
+                <option value="QUIMICA">Química</option>
+                <option value="FISICA">Física</option>
+              </select>
+            </label>
+            {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
+            <button disabled={isSaving} className="w-full rounded bg-emerald-600 p-2 text-xs font-bold text-white disabled:opacity-50">Crear y configurar</button>
+          </form>
         </div>
       )}
     </div>
