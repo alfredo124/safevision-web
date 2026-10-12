@@ -1,10 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, AlertTriangle, Maximize2, X } from 'lucide-react';
+import { Plus, Trash2, AlertTriangle, Maximize2, X, Camera } from 'lucide-react';
 import { authService } from '../../services/authService';
 
 const API_URL = 'http://localhost:8000';
 const cameraFeedUrl = (cameraId: string, token: string) =>
   `${API_URL}/modules/ai_vision/video_feed/${cameraId.replace('cam-', '')}?token=${encodeURIComponent(token)}`;
+
+async function fetchAvailableCameras(token: string): Promise<AvailableCamera[]> {
+  const response = await fetch(`${API_URL}/modules/ai_vision/cameras/available`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.detail || 'No se pudieron detectar las cámaras conectadas.');
+  return result as AvailableCamera[];
+}
 
 // 1. Interfaces y Tipos
 interface BoundingBox {
@@ -35,6 +44,15 @@ interface CameraApiResponse {
   id: number;
   name: string;
   laboratory_type: 'QUIMICA' | 'FISICA';
+  stream_url: string;
+}
+
+interface AvailableCamera {
+  device_index: number;
+  name: string;
+  stream_url: string;
+  width: number;
+  height: number;
 }
 
 const mapCamera = (camera: CameraApiResponse): CameraData => ({
@@ -157,6 +175,9 @@ export function MonitoreoPage() {
   const [cameraUrl, setCameraUrl] = useState('');
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [cameraError, setCameraError] = useState('');
+  const [availableCameras, setAvailableCameras] = useState<AvailableCamera[]>([]);
+  const [isDiscoveringCameras, setIsDiscoveringCameras] = useState(false);
+  const [addingDeviceIndex, setAddingDeviceIndex] = useState<number | null>(null);
 
   const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
 
@@ -176,6 +197,11 @@ export function MonitoreoPage() {
         const data = await response.json() as CameraApiResponse[];
         setCameras(data.map(mapCamera));
         setCameraError('');
+        setIsDiscoveringCameras(true);
+        void fetchAvailableCameras(token)
+          .then(setAvailableCameras)
+          .catch((reason: unknown) => setCameraError(reason instanceof Error ? reason.message : 'Error al detectar cámaras conectadas.'))
+          .finally(() => setIsDiscoveringCameras(false));
       } catch (error) {
         setCameraError(error instanceof Error ? error.message : 'Error al conectar con el backend.');
       } finally {
@@ -231,6 +257,46 @@ export function MonitoreoPage() {
       setCameraError(error instanceof Error ? error.message : 'Error al conectar con el backend.');
     } finally {
       setIsSubmittingCamera(false);
+    }
+  };
+
+  const discoverLocalCameras = async () => {
+    setCameraError('');
+    setIsDiscoveringCameras(true);
+    try {
+      setAvailableCameras(await fetchAvailableCameras(token));
+    } catch (error) {
+      setCameraError(error instanceof Error ? error.message : 'Error al detectar cámaras conectadas.');
+    } finally {
+      setIsDiscoveringCameras(false);
+    }
+  };
+
+  const addDetectedCamera = async (device: AvailableCamera) => {
+    setCameraError('');
+    setAddingDeviceIndex(device.device_index);
+    try {
+      const response = await fetch(`${API_URL}/modules/ai_vision/cameras`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: device.name,
+          laboratory_type: defaultLaboratory,
+          stream_url: device.stream_url,
+          confidence_threshold: 0.25,
+          processing_fps: 30,
+          is_active: true,
+          overlay_enabled: true,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || 'No se pudo registrar la cámara.');
+      setCameras(current => [...current, mapCamera(result as CameraApiResponse)]);
+      setAvailableCameras(current => current.filter(camera => camera.device_index !== device.device_index));
+    } catch (error) {
+      setCameraError(error instanceof Error ? error.message : 'Error al agregar la cámara.');
+    } finally {
+      setAddingDeviceIndex(null);
     }
   };
 
@@ -368,6 +434,35 @@ export function MonitoreoPage() {
 
         {/* Tarjeta Dinámica de Opción de Agregar Cámara */}
         <div className="border-2 border-dashed border-gray-800 bg-[#12141a]/50 rounded p-4 flex flex-col items-center justify-center gap-3 min-h-[220px]">
+          <div className="w-full space-y-2">
+            <button
+              onClick={() => void discoverLocalCameras()}
+              disabled={isDiscoveringCameras}
+              className="flex w-full items-center justify-center gap-2 rounded border border-emerald-500/40 bg-emerald-950/20 px-3 py-2 text-xs font-semibold text-emerald-400 hover:bg-emerald-950/40 disabled:opacity-50"
+            >
+              <Camera className="h-4 w-4" />
+              {isDiscoveringCameras ? 'Buscando cámaras del equipo...' : 'Detectar cámaras conectadas'}
+            </button>
+            {availableCameras.length > 0 && (
+              <div className="max-h-36 w-full space-y-1 overflow-y-auto">
+                {availableCameras.map(device => (
+                  <div key={device.device_index} className="flex items-center justify-between gap-2 rounded border border-gray-800 bg-gray-900/80 px-2 py-1.5 text-[10px]">
+                    <span className="min-w-0 truncate text-gray-300">{device.name} · {device.width}×{device.height}</span>
+                    <button
+                      onClick={() => void addDetectedCamera(device)}
+                      disabled={addingDeviceIndex !== null}
+                      className="shrink-0 rounded bg-emerald-600 px-2 py-1 font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+                    >
+                      {addingDeviceIndex === device.device_index ? 'Agregando...' : 'Agregar'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {!isDiscoveringCameras && availableCameras.length === 0 && (
+              <p className="text-center text-[10px] text-gray-500">Detecta los dispositivos conectados al equipo del backend.</p>
+            )}
+          </div>
           <button
             onClick={() => { setCameraError(''); setIsCameraFormOpen(true); }}
             className="w-full flex flex-col items-center justify-center gap-2 text-gray-400 hover:text-emerald-400 transition-all group"
