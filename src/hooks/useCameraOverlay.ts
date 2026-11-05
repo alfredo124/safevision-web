@@ -39,6 +39,8 @@ export interface OverlayMessage {
   sync_delay?: number;
   analysis_rate?: number;
   started_at?: number;
+  /** La cámara perdió la señal y el backend está reconectando (no se analiza). */
+  reconnecting?: boolean;
   /** Hora local (ms) en que llegó el mensaje. La pone el cliente. */
   received_at?: number;
 }

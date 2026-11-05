@@ -81,6 +81,9 @@ export interface Incident {
   review_reason: string | null;
   action_taken: ReviewAction | null;
   faults: IncidentFault[];
+  pending_seconds: number | null;
+  /** Pendiente más tiempo del permitido: se avisa al administrador. */
+  escalated: boolean;
 }
 
 export interface CameraMonitoringStatus {

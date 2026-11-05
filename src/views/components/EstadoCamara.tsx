@@ -1,7 +1,7 @@
 import { useEffect, useState, type RefObject } from 'react';
 import type { OverlayMessage } from '../../hooks/useCameraOverlay';
 
-type Fase = 'conectando' | 'sin_practica' | 'sincronizando' | 'analizando' | 'lento';
+type Fase = 'conectando' | 'sin_practica' | 'sincronizando' | 'analizando' | 'lento' | 'reconectando';
 
 /**
  * Barra de estado de una cámara: dice en qué fase está (conectando, sincronizando,
@@ -25,7 +25,10 @@ export function EstadoCamara({ overlay, videoRef }: { overlay: OverlayMessage | 
   let fase: Fase;
   let progreso = 0;
   let texto: string;
-  if (!videoReady) {
+  if (overlay?.reconnecting) {
+    fase = 'reconectando';
+    texto = 'Cámara sin señal: reconectando… (no se generan alertas)';
+  } else if (!videoReady) {
     fase = 'conectando';
     texto = 'Conectando video…';
   } else if (!overlay?.monitoring) {
@@ -58,8 +61,9 @@ export function EstadoCamara({ overlay, videoRef }: { overlay: OverlayMessage | 
     sincronizando: 'bg-sky-500',
     analizando: 'bg-emerald-500',
     lento: 'bg-amber-500',
+    reconectando: 'bg-amber-500',
   }[fase];
-  const indeterminado = fase === 'conectando';
+  const indeterminado = fase === 'conectando' || fase === 'reconectando';
 
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-black/70 px-2 pb-1 pt-0.5 backdrop-blur-sm" role="status" aria-live="polite">

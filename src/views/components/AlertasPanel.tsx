@@ -1,19 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, BellRing, CheckCircle2, ChevronDown, ChevronUp, Image as ImageIcon, XCircle } from 'lucide-react';
+import { authService } from '../../services/authService';
 import { reglasLabService, type Incident, type ReviewAction } from '../../services/reglasLabService';
 import { CapturaModal } from './CapturaModal';
 
 const POLL_MS = 3000;
 
 /** Pitido corto con Web Audio (sin archivos de sonido). */
-function beep() {
+function beep(frequency = 880) {
   try {
     const AudioContextClass = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     const context = new AudioContextClass();
     const oscillator = context.createOscillator();
     const gain = context.createGain();
     oscillator.type = 'square';
-    oscillator.frequency.value = 880;
+    oscillator.frequency.value = frequency;
     gain.gain.value = 0.08;
     oscillator.connect(gain).connect(context.destination);
     oscillator.start();
@@ -36,6 +37,8 @@ export function AlertasPanel() {
   const [captura, setCaptura] = useState<Incident | null>(null);
   const [error, setError] = useState('');
   const known = useRef<Set<number> | null>(null);
+  const knownEscalated = useRef<Set<number>>(new Set());
+  const isAdmin = authService.getCurrentUser()?.role === 'ADMINISTRADOR';
 
   useEffect(() => {
     let active = true;
@@ -49,14 +52,23 @@ export function AlertasPanel() {
           setOpen(true);
         }
         known.current = ids;
-        setPending(items);
+        // Alertas sin respuesta dentro del plazo: el administrador oye un aviso distinto.
+        const escalated = items.filter(item => item.escalated);
+        if (isAdmin && escalated.some(item => !knownEscalated.current.has(item.id))) {
+          beep(660);
+          window.setTimeout(() => beep(440), 300);
+          setOpen(true);
+        }
+        knownEscalated.current = new Set(escalated.map(item => item.id));
+        // Primero las que esperan demasiado; después, las más recientes.
+        setPending([...items].sort((a, b) => Number(b.escalated) - Number(a.escalated)));
         setError('');
       })
       .catch((reason: unknown) => { if (active) setError(reason instanceof Error ? reason.message : 'Sin conexión con el servidor.'); });
     void poll();
     const timer = window.setInterval(() => void poll(), POLL_MS);
     return () => { active = false; window.clearInterval(timer); };
-  }, []);
+  }, [isAdmin]);
 
   const review = async (incident: Incident, payload: { decision: 'CONFIRMADA'; action: ReviewAction } | { decision: 'DESCARTADA'; reason?: string }) => {
     setBusyId(incident.id);
@@ -83,6 +95,11 @@ export function AlertasPanel() {
           <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-red-300">
             <BellRing className="h-4 w-4 animate-pulse" />
             Alertas por validar ({pending.length})
+            {pending.some(item => item.escalated) && (
+              <span className="rounded bg-amber-500 px-1.5 text-[10px] font-bold text-black">
+                {pending.filter(item => item.escalated).length} sin respuesta
+              </span>
+            )}
           </span>
           {open ? <ChevronDown className="h-4 w-4 text-gray-400" /> : <ChevronUp className="h-4 w-4 text-gray-400" />}
         </button>
@@ -91,7 +108,12 @@ export function AlertasPanel() {
           <div className="max-h-[60vh] space-y-2 overflow-y-auto p-2">
             {error && <p role="alert" className="px-1 text-[11px] text-amber-400">{error}</p>}
             {pending.map(incident => (
-              <div key={incident.id} className="space-y-1.5 rounded border-l-4 border-red-500 bg-red-950/20 p-2 text-xs">
+              <div key={incident.id} className={`space-y-1.5 rounded border-l-4 p-2 text-xs ${incident.escalated ? 'border-amber-400 bg-amber-950/30' : 'border-red-500 bg-red-950/20'}`}>
+                {incident.escalated && (
+                  <p className="text-[10px] font-bold text-amber-300">
+                    Sin respuesta hace {Math.floor((incident.pending_seconds ?? 0) / 60)} min{isAdmin ? ' · aviso al administrador' : ' · se avisó al administrador'}
+                  </p>
+                )}
                 <div className="flex items-start justify-between gap-2">
                   <p className="flex items-center gap-1 font-bold text-red-300">
                     <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
