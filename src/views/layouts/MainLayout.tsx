@@ -3,25 +3,28 @@ import { Outlet } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { Sidebar } from '../components/Sidebar';
 import { AlertasPanel } from '../components/AlertasPanel';
+import { EstacionActiva } from '../components/EstacionActiva';
 
 export function MainLayout() {
   return (
-    <div className="flex flex-col w-screen h-screen bg-[#111318] text-gray-200 font-sans select-none overflow-hidden">
-      {/* Header Fijo Superior */}
+    // h-dvh: en el celular descuenta la barra del navegador (h-screen la tapaba).
+    <div className="flex flex-col w-screen h-dvh bg-[#111318] text-gray-200 font-sans select-none overflow-hidden">
       <Header />
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar Fijo Lateral */}
-        <Sidebar />
+      {/* Este dispositivo transmite su cámara: se ve en todas las páginas, con botón para detener. */}
+      <EstacionActiva />
 
-        {/* Contenido Dinámico (Equivalente al <router-outlet> de Angular) */}
+      {/* Alertas pendientes de validación, en todas las páginas.
+          Celular: acordeón bajo la cabecera (no tapa las cámaras). Escritorio: panel flotante. */}
+      <AlertasPanel />
+
+      {/* Celular: el menú queda abajo (flex-col-reverse). Escritorio: menú lateral. */}
+      <div className="flex flex-1 flex-col-reverse md:flex-row overflow-hidden">
+        <Sidebar />
         <main className="flex-1 flex overflow-hidden bg-[#0d0e12]">
           <Outlet />
         </main>
       </div>
-
-      {/* Alertas pendientes de validación: visibles en cualquier página */}
-      <AlertasPanel />
     </div>
   );
 }

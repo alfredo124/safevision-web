@@ -11,6 +11,8 @@ motor dibujados sobre el video, alertas por validar, incidencias, reglas por tal
 2. Doble clic en `instalar.bat` (una vez): ejecuta `npm install`.
 3. Doble clic en `iniciar.bat` (cada vez): sirve la web en el puerto 5173 para este equipo y la red local.
 4. Abre http://localhost:5173. Desde otro equipo o el celular, usa la dirección *Network* que muestra la ventana.
+   Qué IP usar en Wi-Fi o con los datos compartidos de un celular, y qué hacer al cambiar de red: README del backend,
+   sección 4 (`safevison_baken/README.md`).
 
 El backend debe estar arrancado (`safevison_baken\iniciar.bat`).
 
@@ -26,6 +28,7 @@ El backend debe estar arrancado (`safevison_baken\iniciar.bat`).
 |---|---|
 | `npm run dev` | Desarrollo, solo en este equipo |
 | `npm run dev:lan` | Desarrollo, accesible desde la red local (lo usa `iniciar.bat`) |
+| `npm run dev:https` | Igual, con HTTPS (lo usa `iniciar_https.bat`); necesario para la cámara del celular |
 | `npm run build` | Compila para producción en `dist/` |
 | `npx tsc -b` | Comprueba los tipos de TypeScript (`build` no lo hace) |
 | `npm run lint` | Revisa el código con ESLint |
@@ -45,5 +48,6 @@ src/
 ## Problemas comunes
 - *Error al conectar con el servidor*: el backend no está arrancado o, desde otro equipo, falta la regla del firewall
   en el PC servidor (ver la guía del backend).
-- La cámara del celular no se puede usar con `http://`: el navegador exige HTTPS.
+- La cámara del celular no se puede usar con `http://`: el navegador exige HTTPS. Usa `iniciar_https.bat` aquí y en
+  el backend (guía del backend, sección *Usar la cámara del celular*).
 - Errores de módulos: vuelve a ejecutar `instalar.bat`.

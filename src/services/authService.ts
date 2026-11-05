@@ -73,5 +73,6 @@ export const authService = {
 
   logout: async (): Promise<void> => {
     localStorage.removeItem(SESSION_KEY);
+    window.dispatchEvent(new Event('safevision:logout'));  // corta la transmisión de la estación, si la hay
   },
 };

@@ -1,3 +1,4 @@
+import { useServerChanges } from '../../services/changeEvents';
 import React, { useEffect, useState } from 'react';
 import {
   Calendar,
@@ -101,6 +102,13 @@ export function IncidenciasPage() {
   const [error, setError] = useState('');
   const [captura, setCaptura] = useState<Incident | null>(null);
 
+  // Alertas nuevas o validadas desde otra pantalla: el historial se actualiza al instante.
+  useServerChanges(['incidents', 'workshops'], () => {
+    reglasLabService.getIncidents()
+      .then(incidents => setHistorial(incidents.map(mapIncident)))
+      .catch(() => { /* se reintenta */ });
+  });
+
   useEffect(() => {
     let active = true;
     Promise.all([reglasLabService.getIncidents(), reglasLabService.getConfiguration()])
@@ -162,7 +170,7 @@ export function IncidenciasPage() {
   };
 
   return (
-    <div className="flex flex-1 flex-col h-full bg-[#0d0e12] text-white p-6 overflow-y-auto space-y-6">
+    <div className="flex flex-1 flex-col h-full bg-[#0d0e12] text-white p-3 md:p-6 overflow-y-auto space-y-4 md:space-y-6">
 
       {/* Encabezado y Filtros Globales */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-800 pb-5">
@@ -175,7 +183,7 @@ export function IncidenciasPage() {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 bg-[#16181e] p-2.5 rounded-lg border border-gray-800 text-xs">
+        <div className="flex flex-wrap items-center gap-2 md:gap-3 bg-[#16181e] p-2.5 rounded-lg border border-gray-800 text-xs">
           <div className="flex items-center gap-2">
             <Calendar className="w-4 h-4 text-emerald-400" />
             <input
@@ -193,7 +201,7 @@ export function IncidenciasPage() {
             />
           </div>
 
-          <div className="flex items-center gap-2 border-l border-gray-700 pl-3">
+          <div className="flex items-center gap-2 md:border-l border-gray-700 md:pl-3">
             <Filter className="w-4 h-4 text-indigo-400" />
             <select
               value={ambienteFiltro}
@@ -216,37 +224,37 @@ export function IncidenciasPage() {
       {isLoading && <p className="text-sm text-gray-400">Cargando incidencias...</p>}
 
       {/* Tarjetas KPI de Resumen */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-[#16181e] p-4 rounded-lg border border-gray-800 flex items-center justify-between">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-4">
+        <div className="bg-[#16181e] p-3 md:p-4 rounded-lg border border-gray-800 flex items-center justify-between">
           <div>
-            <p className="text-xs text-gray-400 uppercase font-bold">Total Registros</p>
+            <p className="text-[10px] md:text-xs text-gray-400 uppercase font-bold">Total Registros</p>
             <p className="text-2xl font-mono font-bold text-white mt-1">{totalIncidentes}</p>
           </div>
-          <BarChart3 className="w-8 h-8 text-indigo-400 opacity-80" />
+          <BarChart3 className="hidden sm:block w-8 h-8 shrink-0 text-indigo-400 opacity-80" />
         </div>
 
-        <div className="bg-[#16181e] p-4 rounded-lg border border-red-500/30 bg-red-950/10 flex items-center justify-between">
+        <div className="bg-[#16181e] p-3 md:p-4 rounded-lg border border-red-500/30 bg-red-950/10 flex items-center justify-between">
           <div>
-            <p className="text-xs text-red-400 uppercase font-bold">Infracciones Graves</p>
+            <p className="text-[10px] md:text-xs text-red-400 uppercase font-bold">Infracciones Graves</p>
             <p className="text-2xl font-mono font-bold text-red-400 mt-1">{totalGraves}</p>
           </div>
-          <AlertOctagon className="w-8 h-8 text-red-500 opacity-80" />
+          <AlertOctagon className="hidden sm:block w-8 h-8 shrink-0 text-red-500 opacity-80" />
         </div>
 
-        <div className="bg-[#16181e] p-4 rounded-lg border border-amber-500/30 bg-amber-950/10 flex items-center justify-between">
+        <div className="bg-[#16181e] p-3 md:p-4 rounded-lg border border-amber-500/30 bg-amber-950/10 flex items-center justify-between">
           <div>
-            <p className="text-xs text-amber-400 uppercase font-bold">Infracciones Moderadas</p>
+            <p className="text-[10px] md:text-xs text-amber-400 uppercase font-bold">Infracciones Moderadas</p>
             <p className="text-2xl font-mono font-bold text-amber-400 mt-1">{totalModerados}</p>
           </div>
-          <ShieldAlert className="w-8 h-8 text-amber-500 opacity-80" />
+          <ShieldAlert className="hidden sm:block w-8 h-8 shrink-0 text-amber-500 opacity-80" />
         </div>
 
-        <div className="bg-[#16181e] p-4 rounded-lg border border-yellow-500/30 bg-yellow-950/10 flex items-center justify-between">
+        <div className="bg-[#16181e] p-3 md:p-4 rounded-lg border border-yellow-500/30 bg-yellow-950/10 flex items-center justify-between">
           <div>
-            <p className="text-xs text-yellow-400 uppercase font-bold">Infracciones Leves</p>
+            <p className="text-[10px] md:text-xs text-yellow-400 uppercase font-bold">Infracciones Leves</p>
             <p className="text-2xl font-mono font-bold text-yellow-400 mt-1">{totalLeves}</p>
           </div>
-          <TrendingUp className="w-8 h-8 text-yellow-500 opacity-80" />
+          <TrendingUp className="hidden sm:block w-8 h-8 shrink-0 text-yellow-500 opacity-80" />
         </div>
       </div>
 
@@ -305,7 +313,7 @@ export function IncidenciasPage() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-gray-300">
+          <table className="w-full min-w-[760px] text-left text-xs text-gray-300">
             <thead className="bg-gray-900/90 text-gray-400 uppercase text-[10px] tracking-wider border-b border-gray-800">
               <tr>
                 <th className="p-3">Código</th>

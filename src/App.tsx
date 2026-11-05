@@ -8,6 +8,7 @@ import { MonitoreoPage } from './views/pages/Monitoreo';
 import { ConfigReglasPage } from './views/pages/ConfigReglas';
 import { IncidenciasPage } from './views/pages/Incidencias';
 import { ReportesPage } from './views/pages/Reportes';
+import { EstacionCamaraPage } from './views/pages/EstacionCamara';
 import { authService } from './services/authService';
 
 function ProtectedRoutes() {
@@ -30,6 +31,7 @@ export default function App() {
             <Route path="reglas" element={<ConfigReglasPage />} />
             <Route path="incidencias" element={<IncidenciasPage />} />
             <Route path="reportes" element={<ReportesPage />} />
+            <Route path="estacion" element={<EstacionCamaraPage />} />
           </Route>
         </Route>
 

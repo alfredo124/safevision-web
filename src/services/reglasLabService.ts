@@ -104,6 +104,8 @@ export interface CameraMonitoringStatus {
 
 export interface MonitoringResponse {
   workshop_id: number;
+  /** La práctica está en curso (aunque todavía no tenga cámaras analizándose). */
+  active?: boolean;
   cameras: CameraMonitoringStatus[];
   cleared_incidents?: number;
 }

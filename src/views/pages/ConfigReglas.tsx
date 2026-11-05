@@ -1,3 +1,4 @@
+import { useServerChanges } from '../../services/changeEvents';
 import React, { useEffect, useState } from 'react';
 import { 
   Shield, Camera, Check, AlertCircle, AlertTriangle, 
@@ -88,6 +89,8 @@ export function ConfigReglasPage() {
       ? current
       : mapped.workshops[0]?.id ?? null);
   };
+
+  useServerChanges(['cameras', 'workshops'], () => { loadConfiguration().catch(() => { /* siguiente aviso */ }); });
 
   useEffect(() => {
     let isCurrent = true;
@@ -243,9 +246,9 @@ export function ConfigReglasPage() {
   }
 
   return (
-    <div className="flex flex-1 h-full bg-[#0d0e12] text-white overflow-hidden">
+    <div className="flex flex-1 flex-col md:flex-row h-full bg-[#0d0e12] text-white overflow-y-auto md:overflow-hidden">
       {/* 1. Panel Izquierdo: Selección de Ambientes */}
-      <aside className="w-80 border-r border-gray-800 bg-[#16181e] p-4 flex flex-col justify-between shrink-0">
+      <aside className="w-full md:w-80 border-b md:border-b-0 md:border-r border-gray-800 bg-[#16181e] p-3 md:p-4 flex flex-col justify-between gap-3 shrink-0">
         <div className="space-y-4">
           <div className="mb-2 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
@@ -283,7 +286,7 @@ export function ConfigReglasPage() {
           </div>
         </div>
 
-        <div className="space-y-1 rounded border border-gray-800 bg-gray-900/80 p-3 text-xs text-gray-400">
+        <div className="hidden md:block space-y-1 rounded border border-gray-800 bg-gray-900/80 p-3 text-xs text-gray-400">
           <p className="flex items-center gap-1 font-semibold text-gray-300">
             <AlertCircle className="w-3.5 h-3.5 text-indigo-400" /> Regla de Heredado:
           </p>
@@ -294,7 +297,7 @@ export function ConfigReglasPage() {
       </aside>
 
       {/* 2. Panel Central Contenido Principal */}
-      <main className="flex-1 p-6 overflow-y-auto space-y-8">
+      <main className="flex-1 p-3 md:p-6 md:overflow-y-auto space-y-6 md:space-y-8">
         
         {/* Encabezado del Área y Botón de Carga Python */}
         <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-gray-800 pb-4 gap-4">
@@ -408,7 +411,7 @@ export function ConfigReglasPage() {
 
         {/* SECCIÓN 2: Avatar / Loadout de EPP */}
         <div className="flex justify-center">
-          <div className="relative w-80 h-[420px] bg-[#12141c] border border-gray-800 rounded-2xl flex flex-col items-center justify-between p-4 shadow-2xl">
+          <div className="relative w-full max-w-80 h-[420px] bg-[#12141c] border border-gray-800 rounded-2xl flex flex-col items-center justify-between p-4 shadow-2xl">
             <div className="w-full space-y-2 z-10">
               {eppCatalogo.map((item) => {
                 const active = !!activeAmbiente.eppRequerido[item.id];

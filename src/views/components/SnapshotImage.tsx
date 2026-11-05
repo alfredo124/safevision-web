@@ -53,5 +53,6 @@ export function SnapshotImage({ cameraId, sync, alt, className, intervalMs = 100
     };
   }, [cameraId, sync, intervalMs]);
 
-  return url ? <img ref={ref} src={url} alt={alt} className={className} /> : <img ref={ref} alt={alt} className={className} />;
+  // Sin imagen todavía: el elemento existe (lo usa el estado de la cámara) pero no se ve el icono roto.
+  return url ? <img ref={ref} src={url} alt={alt} className={className} /> : <img ref={ref} alt="" className={`${className ?? ""} invisible`} />;
 }

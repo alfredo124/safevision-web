@@ -26,10 +26,10 @@ export function ReportesPage() {
   };
 
   return (
-    <div className="flex flex-1 flex-col h-full bg-[#0d0e12] text-white p-6 overflow-y-auto space-y-6">
+    <div className="flex flex-1 flex-col h-full bg-[#0d0e12] text-white p-3 md:p-6 overflow-y-auto space-y-4 md:space-y-6">
       {/* Encabezado Principal */}
       <div className="border-b border-gray-800 pb-4">
-        <h1 className="text-2xl font-bold uppercase tracking-wide text-white flex items-center gap-2">
+        <h1 className="text-lg md:text-2xl font-bold uppercase tracking-wide text-white flex items-center gap-2">
           <FileText className="w-7 h-7 text-red-500" /> Generador de Reportes SST
         </h1>
         <p className="text-xs text-gray-400 mt-1">

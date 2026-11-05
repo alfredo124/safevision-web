@@ -44,7 +44,7 @@ function Evidencia({ incidentId, fault }: { incidentId: number; fault: IncidentF
 /** Evidencias de una alerta: una captura por cada EPP faltante, con rostros cubiertos. */
 export function CapturaModal({ incident, onClose }: { incident: Incident; onClose: () => void }) {
   return (
-    <div role="dialog" aria-label={`Evidencias ${incident.code}`} className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
+    <div role="dialog" aria-label={`Evidencias ${incident.code}`} className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-2 md:p-4" onClick={onClose}>
       <div className="max-h-[90vh] max-w-4xl overflow-y-auto rounded-lg border border-gray-700 bg-[#16181e] p-3" onClick={event => event.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between gap-4">
           <div>

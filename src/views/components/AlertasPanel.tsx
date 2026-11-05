@@ -1,8 +1,10 @@
+import { useServerChanges } from '../../services/changeEvents';
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, BellRing, CheckCircle2, ChevronDown, ChevronUp, Image as ImageIcon, XCircle } from 'lucide-react';
 import { authService } from '../../services/authService';
 import { reglasLabService, type Incident, type ReviewAction } from '../../services/reglasLabService';
 import { CapturaModal } from './CapturaModal';
+import { useIsMobile } from '../../hooks/useIsMobile';
 
 const POLL_MS = 3000;
 
@@ -31,7 +33,11 @@ function beep(frequency = 880) {
  */
 export function AlertasPanel() {
   const [pending, setPending] = useState<Incident[]>([]);
-  const [open, setOpen] = useState(true);
+  const mobile = useIsMobile();
+  // En el celular empieza plegado para no tapar las cámaras. Nunca se abre solo: una alerta nueva
+  // suena y se marca como "nueva" hasta que el encargado abre el panel.
+  const [open, setOpen] = useState(() => !window.matchMedia('(max-width: 767px)').matches);
+  const [unseen, setUnseen] = useState(0);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [discarding, setDiscarding] = useState<{ id: number; reason: string } | null>(null);
   const [captura, setCaptura] = useState<Incident | null>(null);
@@ -40,16 +46,21 @@ export function AlertasPanel() {
   const knownEscalated = useRef<Set<number>>(new Set());
   const isAdmin = authService.getCurrentUser()?.role === 'ADMINISTRADOR';
 
+  const pollRef = useRef<() => void>(() => undefined);
+  // Una alerta nueva o validada en otro equipo se ve al instante (la consulta cada 3 s queda de respaldo).
+  useServerChanges(['incidents'], () => pollRef.current());
+
   useEffect(() => {
     let active = true;
     const poll = () => reglasLabService.getIncidents({ status: 'PENDIENTE' })
       .then(items => {
         if (!active) return;
         const ids = new Set(items.map(item => item.id));
-        // Aviso sonoro y panel abierto solo si llegó una alerta nueva (no en la primera carga).
-        if (known.current && items.some(item => !known.current?.has(item.id))) {
+        // Aviso sonoro si llegó una alerta nueva (no en la primera carga). El panel no se abre solo.
+        const fresh = known.current ? items.filter(item => !known.current?.has(item.id)).length : 0;
+        if (fresh > 0) {
           beep();
-          setOpen(true);
+          setUnseen(count => count + fresh);
         }
         known.current = ids;
         // Alertas sin respuesta dentro del plazo: el administrador oye un aviso distinto.
@@ -57,7 +68,6 @@ export function AlertasPanel() {
         if (isAdmin && escalated.some(item => !knownEscalated.current.has(item.id))) {
           beep(660);
           window.setTimeout(() => beep(440), 300);
-          setOpen(true);
         }
         knownEscalated.current = new Set(escalated.map(item => item.id));
         // Primero las que esperan demasiado; después, las más recientes.
@@ -65,6 +75,7 @@ export function AlertasPanel() {
         setError('');
       })
       .catch((reason: unknown) => { if (active) setError(reason instanceof Error ? reason.message : 'Sin conexión con el servidor.'); });
+    pollRef.current = () => void poll();
     void poll();
     const timer = window.setInterval(() => void poll(), POLL_MS);
     return () => { active = false; window.clearInterval(timer); };
@@ -87,25 +98,35 @@ export function AlertasPanel() {
 
   return (
     <>
-      <div className="fixed bottom-4 right-4 z-50 w-96 max-w-[calc(100vw-2rem)] rounded-lg border border-red-500/60 bg-[#16181e] shadow-2xl shadow-black/60">
+      <div className="relative z-30 w-full shrink-0 border-b border-red-500/60 bg-[#16181e] md:fixed md:bottom-4 md:right-4 md:z-50 md:w-96 md:max-w-[calc(100vw-2rem)] md:rounded-lg md:border md:shadow-2xl md:shadow-black/60">
         <button
-          onClick={() => setOpen(value => !value)}
-          className="flex w-full items-center justify-between gap-2 rounded-t-lg bg-red-950/60 px-3 py-2 text-left"
+          onClick={() => { setOpen(value => !value); setUnseen(0); }}
+          aria-expanded={open}
+          className="flex w-full items-center justify-between gap-2 bg-red-950/60 px-3 py-2 text-left md:rounded-t-lg"
         >
           <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-red-300">
             <BellRing className="h-4 w-4 animate-pulse" />
             Alertas por validar ({pending.length})
+            {unseen > 0 && !open && (
+              <span className="animate-pulse rounded bg-red-500 px-1.5 text-[10px] font-bold text-white">
+                {unseen} nueva{unseen === 1 ? '' : 's'}
+              </span>
+            )}
             {pending.some(item => item.escalated) && (
               <span className="rounded bg-amber-500 px-1.5 text-[10px] font-bold text-black">
                 {pending.filter(item => item.escalated).length} sin respuesta
               </span>
             )}
           </span>
-          {open ? <ChevronDown className="h-4 w-4 text-gray-400" /> : <ChevronUp className="h-4 w-4 text-gray-400" />}
+          <span className="flex items-center gap-1 text-[10px] text-gray-400">
+            {mobile && (open ? 'Ocultar' : 'Ver')}
+            {/* El acordeón del celular se despliega hacia abajo; el panel flotante, hacia arriba. */}
+            {open === mobile ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          </span>
         </button>
 
         {open && (
-          <div className="max-h-[60vh] space-y-2 overflow-y-auto p-2">
+          <div className="max-h-[45dvh] space-y-2 overflow-y-auto p-2 md:max-h-[60vh]">
             {error && <p role="alert" className="px-1 text-[11px] text-amber-400">{error}</p>}
             {pending.map(incident => (
               <div key={incident.id} className={`space-y-1.5 rounded border-l-4 p-2 text-xs ${incident.escalated ? 'border-amber-400 bg-amber-950/30' : 'border-red-500 bg-red-950/20'}`}>
@@ -140,35 +161,35 @@ export function AlertasPanel() {
                       value={discarding.reason}
                       onChange={event => setDiscarding({ id: incident.id, reason: event.target.value })}
                       placeholder="Motivo (opcional), p. ej. lleva guantes transparentes"
-                      className="w-full rounded border border-gray-700 bg-gray-900 px-2 py-1 text-[11px] text-white outline-none focus:border-gray-500"
+                      className="w-full rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-[11px] md:py-1 text-white outline-none focus:border-gray-500"
                     />
                     <div className="flex gap-1">
                       <button disabled={busyId === incident.id} onClick={() => void review(incident, { decision: 'DESCARTADA', reason: discarding.reason })}
-                        className="flex-1 rounded bg-gray-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-gray-500 disabled:opacity-50">
+                        className="flex-1 rounded bg-gray-600 px-2 py-1.5 text-[11px] md:py-1 font-semibold text-white hover:bg-gray-500 disabled:opacity-50">
                         Confirmar descarte
                       </button>
-                      <button onClick={() => setDiscarding(null)} className="rounded border border-gray-700 px-2 py-1 text-[11px] text-gray-300 hover:bg-gray-800">Volver</button>
+                      <button onClick={() => setDiscarding(null)} className="rounded border border-gray-700 px-2 py-1.5 text-[11px] md:py-1 text-gray-300 hover:bg-gray-800">Volver</button>
                     </div>
                   </div>
                 ) : (
                   <div className="flex flex-wrap gap-1">
                     {incident.faults.some(fault => fault.has_capture) && (
-                      <button onClick={() => setCaptura(incident)} className="flex items-center gap-1 rounded border border-gray-600 px-2 py-1 text-[11px] text-gray-200 hover:bg-gray-800">
+                      <button onClick={() => setCaptura(incident)} className="flex items-center gap-1 rounded border border-gray-600 px-2 py-1.5 text-[11px] md:py-1 text-gray-200 hover:bg-gray-800">
                         <ImageIcon className="h-3 w-3" /> Ver evidencias ({incident.faults.filter(fault => fault.has_capture).length})
                       </button>
                     )}
                     <button disabled={busyId === incident.id} onClick={() => void review(incident, { decision: 'CONFIRMADA', action: 'CORREGIDO' })}
-                      className="flex items-center gap-1 rounded bg-emerald-700 px-2 py-1 text-[11px] font-semibold text-white hover:bg-emerald-600 disabled:opacity-50"
+                      className="flex items-center gap-1 rounded bg-emerald-700 px-2 py-1.5 text-[11px] md:py-1 font-semibold text-white hover:bg-emerald-600 disabled:opacity-50"
                       title="La falta era real y se corrigió en el momento">
                       <CheckCircle2 className="h-3 w-3" /> Confirmar: corregido
                     </button>
                     <button disabled={busyId === incident.id} onClick={() => void review(incident, { decision: 'CONFIRMADA', action: 'RETIRADO_DE_PRACTICA' })}
-                      className="rounded bg-red-700 px-2 py-1 text-[11px] font-semibold text-white hover:bg-red-600 disabled:opacity-50"
+                      className="rounded bg-red-700 px-2 py-1.5 text-[11px] md:py-1 font-semibold text-white hover:bg-red-600 disabled:opacity-50"
                       title="La falta era real y la persona fue retirada de la práctica">
                       Confirmar: retirado
                     </button>
                     <button disabled={busyId === incident.id} onClick={() => setDiscarding({ id: incident.id, reason: '' })}
-                      className="flex items-center gap-1 rounded border border-gray-600 px-2 py-1 text-[11px] text-gray-300 hover:bg-gray-800 disabled:opacity-50"
+                      className="flex items-center gap-1 rounded border border-gray-600 px-2 py-1.5 text-[11px] md:py-1 text-gray-300 hover:bg-gray-800 disabled:opacity-50"
                       title="Falsa alarma: no se guarda la imagen">
                       <XCircle className="h-3 w-3" /> Descartar
                     </button>

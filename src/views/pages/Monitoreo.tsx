@@ -1,5 +1,7 @@
+import { useServerChanges } from '../../services/changeEvents';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Trash2, AlertTriangle, Maximize2, X, Camera } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Trash2, AlertTriangle, Maximize2, X, Camera, ChevronDown, ChevronUp, Smartphone } from 'lucide-react';
 import { authService } from '../../services/authService';
 import { reglasLabService } from '../../services/reglasLabService';
 import { OverlayCanvas } from '../components/CameraOverlay';
@@ -93,29 +95,29 @@ function CameraCard({
       onClick={() => onExpand(camera.id)}
       className="relative bg-black rounded border border-gray-800 overflow-hidden flex flex-col w-full h-full group cursor-pointer hover:border-emerald-500/50 transition-colors"
     >
-      <div className="absolute top-2 left-2 z-10 bg-black/70 backdrop-blur-md text-xs px-2.5 py-1 rounded text-white font-semibold border border-gray-700 flex items-center gap-2">
+      <div className="absolute top-2 left-2 right-20 md:right-auto z-10 bg-black/70 backdrop-blur-md text-xs px-2.5 py-1 rounded text-white font-semibold border border-gray-700 flex flex-wrap items-center gap-x-2">
         <span>{camera.nombre}</span>
         <span className="font-normal text-gray-300">{status}</span>
       </div>
 
-      <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
         <button
           onClick={(e) => { e.stopPropagation(); onExpand(camera.id); }}
-          className="bg-gray-800/80 hover:bg-gray-700 text-white p-1 rounded border border-gray-600"
+          className="bg-gray-800/80 hover:bg-gray-700 text-white p-1.5 md:p-1 rounded border border-gray-600"
           title="Ampliar pantalla"
         >
           <Maximize2 className="w-3.5 h-3.5" />
         </button>
         <button
           onClick={(e) => onDelete(camera.id, e)}
-          className="bg-red-600/80 hover:bg-red-600 text-white p-1 rounded"
+          className="bg-red-600/80 hover:bg-red-600 text-white p-1.5 md:p-1 rounded"
           title="Eliminar cámara"
         >
           <Trash2 className="w-3.5 h-3.5" />
         </button>
       </div>
 
-      <div className="relative flex-1 bg-[#1a1a1a] flex items-center justify-center overflow-hidden min-h-[220px]">
+      <div className="relative flex-1 bg-[#1a1a1a] flex items-center justify-center overflow-hidden aspect-video sm:aspect-auto sm:min-h-[220px]">
         {/* Miniatura: una imagen por segundo, sin conexión de video permanente (Tarea 0B). */}
         <SnapshotImage
           ref={videoRef}
@@ -148,6 +150,9 @@ export function MonitoreoPage() {
   const [availableCameras, setAvailableCameras] = useState<AvailableCamera[]>([]);
   const [isDiscoveringCameras, setIsDiscoveringCameras] = useState(false);
   const [addingDeviceIndex, setAddingDeviceIndex] = useState<number | null>(null);
+  const [isCreatingBrowserCamera, setIsCreatingBrowserCamera] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);  // solo celular; en escritorio siempre visible
+  const navigate = useNavigate();
 
   const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
   const expandedVideoRef = useRef<HTMLImageElement>(null);
@@ -172,6 +177,19 @@ export function MonitoreoPage() {
       )))
       .catch(() => { /* sin catálogo se muestran solo los códigos */ });
   }, [token]);
+
+  // Otra pantalla (u otro equipo) agregó o quitó una cámara: se recarga la lista sin salir de la vista.
+  useServerChanges(['cameras'], () => {
+    if (!token) return;
+    fetch(`${API_URL}/modules/ai_vision/cameras`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(response => (response.ok ? response.json() as Promise<CameraApiResponse[]> : null))
+      .then(data => {
+        if (!data) return;
+        setCameras(data.map(mapCamera));
+        setSelectedCameraId(current => (current && data.some(camera => `cam-${camera.id}` === current) ? current : null));
+      })
+      .catch(() => { /* se reintenta con el siguiente aviso */ });
+  });
 
   useEffect(() => {
     if (!token) {
@@ -289,6 +307,28 @@ export function MonitoreoPage() {
     }
   };
 
+  // Cámara de este dispositivo (celular o laptop): se registra y se abre la estación transmitiendo.
+  const startDeviceCamera = async () => {
+    setCameraError('');
+    setIsCreatingBrowserCamera(true);
+    try {
+      const agent = navigator.userAgent;
+      const kind = /iPhone|iPad/.test(agent) ? 'iPhone' : /Android/.test(agent) ? 'Celular Android' : 'Navegador';
+      const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const response = await fetch(`${API_URL}/modules/ai_vision/cameras/browser`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: `${kind} ${time}`, laboratory_type: defaultLaboratory }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || 'No se pudo registrar la cámara.');
+      navigate(`/estacion?camara=${result.id}&iniciar=1`);
+    } catch (error) {
+      setCameraError(error instanceof Error ? error.message : 'Error al registrar la cámara.');
+      setIsCreatingBrowserCamera(false);
+    }
+  };
+
   const handleDeleteCamera = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (/^cam-\d+$/.test(id)) {
@@ -324,10 +364,25 @@ export function MonitoreoPage() {
   const equipmentLabel = (id: string, code: string | null) => `${equipment[id]?.icon ?? ''} ${equipment[id]?.name ?? id}${code ? ` (${code})` : ''}`;
 
   return (
-    <div className="relative flex flex-1 h-full overflow-hidden">
-      {/* Sidebar Estadísticas */}
-      <aside className="w-72 shrink-0 bg-[#16181e] border-r border-gray-800 flex flex-col justify-between p-4 overflow-y-auto">
-        <div className="space-y-6">
+    <div className="relative flex flex-1 flex-col md:flex-row h-full overflow-hidden">
+      {/* Estadísticas. Celular: acordeón plegable sobre las cámaras. Escritorio: panel lateral. */}
+      <aside className="w-full md:w-72 shrink-0 bg-[#16181e] border-b md:border-b-0 md:border-r border-gray-800 flex flex-col md:justify-between p-0 md:p-4 max-h-[45dvh] md:max-h-none overflow-y-auto">
+        <button
+          onClick={() => setStatsOpen(open => !open)}
+          aria-expanded={statsOpen}
+          className="flex md:hidden w-full items-center justify-between gap-2 px-3 py-2 text-left text-[11px] text-gray-300"
+        >
+          <span>
+            <strong className="text-white">{monitoredCameras}</strong> de {cameras.length} en práctica ·{' '}
+            <strong className="text-white">{visiblePeople.length}</strong> persona(s) ·{' '}
+            <strong className={totalGraves ? 'text-red-400' : 'text-white'}>{totalGraves}</strong> con falta
+          </span>
+          <span className="flex items-center gap-1 text-[10px] text-gray-400">
+            {statsOpen ? 'Ocultar' : 'Detalle'}
+            {statsOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          </span>
+        </button>
+        <div className={`${statsOpen ? 'block' : 'hidden'} md:block space-y-6 px-3 pb-3 md:p-0`}>
           <div className="space-y-3">
             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">
               Estadísticas del Ambiente Activo
@@ -434,7 +489,7 @@ export function MonitoreoPage() {
       </aside>
 
       {/* Grid de Cámaras */}
-      <div className="flex-1 p-3 grid grid-cols-2 auto-rows-fr gap-3 bg-[#0d0e12] w-full h-full overflow-y-auto">
+      <div className="flex-1 min-h-0 p-2 md:p-3 grid grid-cols-1 sm:grid-cols-2 content-start sm:content-stretch sm:auto-rows-fr gap-2 md:gap-3 bg-[#0d0e12] w-full overflow-y-auto">
         {isLoadingCameras && (
           <div className="col-span-full text-sm text-gray-400">Cargando cámaras...</div>
         )}
@@ -457,14 +512,29 @@ export function MonitoreoPage() {
 
         {/* Tarjeta Dinámica de Opción de Agregar Cámara */}
         <div className="border-2 border-dashed border-gray-800 bg-[#12141a]/50 rounded p-4 flex flex-col items-center justify-center gap-3 min-h-[220px]">
-          <div className="w-full space-y-2">
+          <div className="w-full space-y-1">
+            <button
+              onClick={() => void startDeviceCamera()}
+              disabled={isCreatingBrowserCamera || !window.isSecureContext}
+              className="flex w-full items-center justify-center gap-2 rounded bg-emerald-600 px-3 py-2.5 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+            >
+              <Smartphone className="h-4 w-4" />
+              {isCreatingBrowserCamera ? 'Preparando la cámara…' : 'Usar la cámara de este dispositivo'}
+            </button>
+            <p className="text-center text-[10px] text-gray-500">
+              {window.isSecureContext
+                ? 'Celular o laptop: transmite desde el navegador mientras la pantalla esté abierta.'
+                : 'Requiere abrir SafeVision con https:// (ver README, sección 4b).'}
+            </p>
+          </div>
+          <div className="w-full space-y-2 border-t border-gray-800 pt-3">
             <button
               onClick={() => void discoverLocalCameras()}
               disabled={isDiscoveringCameras}
               className="flex w-full items-center justify-center gap-2 rounded border border-emerald-500/40 bg-emerald-950/20 px-3 py-2 text-xs font-semibold text-emerald-400 hover:bg-emerald-950/40 disabled:opacity-50"
             >
               <Camera className="h-4 w-4" />
-              {isDiscoveringCameras ? 'Buscando cámaras del equipo...' : 'Detectar cámaras conectadas'}
+              {isDiscoveringCameras ? 'Buscando cámaras del servidor...' : 'Detectar cámaras del PC servidor'}
             </button>
             {availableCameras.length > 0 && (
               <div className="max-h-36 w-full space-y-1 overflow-y-auto">
@@ -483,7 +553,7 @@ export function MonitoreoPage() {
               </div>
             )}
             {!isDiscoveringCameras && availableCameras.length === 0 && (
-              <p className="text-center text-[10px] text-gray-500">Detecta los dispositivos conectados al equipo del backend.</p>
+              <p className="text-center text-[10px] text-gray-500">Cámaras USB o integradas del PC donde corre el backend (la opción más rápida en ese PC).</p>
             )}
           </div>
           <button
@@ -499,8 +569,8 @@ export function MonitoreoPage() {
       </div>
 
       {isCameraFormOpen && (
-        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/75 p-4">
-          <form onSubmit={handleSubmitCamera} className="w-full max-w-lg space-y-4 rounded border border-gray-700 bg-[#16181e] p-5 shadow-2xl">
+        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/75 p-2 md:p-4">
+          <form onSubmit={handleSubmitCamera} className="w-full max-w-lg max-h-full overflow-y-auto space-y-4 rounded border border-gray-700 bg-[#16181e] p-4 md:p-5 shadow-2xl">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-bold uppercase tracking-wider text-white">Registrar cámara</h2>
               <button type="button" onClick={() => setIsCameraFormOpen(false)} className="text-gray-400 hover:text-white" aria-label="Cerrar formulario">
@@ -570,7 +640,7 @@ export function MonitoreoPage() {
 
       {/* MODAL / PANTALLA COMPLETA */}
       {selectedCamera && (
-        <div className="absolute inset-0 z-50 bg-black/90 backdrop-blur-md p-4 flex flex-col justify-between animate-in fade-in duration-200">
+        <div className="absolute inset-0 z-50 bg-black/90 backdrop-blur-md p-2 md:p-4 flex flex-col justify-between animate-in fade-in duration-200">
           <div className="flex items-center justify-between bg-[#16181e] p-3 rounded border border-gray-800 mb-3">
             <div className="flex items-center gap-3">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -581,7 +651,7 @@ export function MonitoreoPage() {
               className="flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white px-3 py-1.5 rounded border border-gray-700 text-xs font-semibold transition-colors"
             >
               <X className="w-4 h-4" />
-              <span>Cerrar (Esc)</span>
+              <span>Cerrar<span className="hidden md:inline"> (Esc)</span></span>
             </button>
           </div>
 

@@ -1,14 +1,28 @@
+import { useServerChanges } from '../../services/changeEvents';
 import { useCallback, useEffect, useState } from 'react';
 import { Play, Square, Activity } from 'lucide-react';
 import { reglasLabService, type CameraMonitoringStatus } from '../../services/reglasLabService';
+import { authService } from '../../services/authService';
+import { API_BASE } from '../../services/apiConfig';
+
+interface Rendimiento {
+  measured: boolean;
+  ms_per_analysis: number | null;
+  device: string | null;
+  hint: string | null;
+  max_fps: number;
+  manual: boolean;
+}
 
 /** Inicia o finaliza el monitoreo de un taller. El análisis sigue aunque se cierre esta página. */
 export function PracticaControl({ workshopId }: { workshopId: number }) {
   const [cameras, setCameras] = useState<CameraMonitoringStatus[]>([]);
+  const [active, setActive] = useState(false);
   const [checkedAt, setCheckedAt] = useState(0);  // hora (s) de la última consulta de estado
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [canClear, setCanClear] = useState(false);
+  const [rendimiento, setRendimiento] = useState<Rendimiento | null>(null);
   const [clearPrevious, setClearPrevious] = useState(true);
 
   useEffect(() => {
@@ -23,6 +37,7 @@ export function PracticaControl({ workshopId }: { workshopId: number }) {
     try {
       const status = await reglasLabService.getMonitoring(workshopId);
       setCameras(status.cameras);
+      setActive(Boolean(status.active));
     } catch (reason) {
       setMessage(reason instanceof Error ? reason.message : 'No se pudo consultar el monitoreo.');
     }
@@ -34,6 +49,7 @@ export function PracticaControl({ workshopId }: { workshopId: number }) {
       .then(status => {
         if (!active) return;
         setCameras(status.cameras);
+      setActive(Boolean(status.active));
         setCheckedAt(Date.now() / 1000);
       })
       .catch(() => { /* se reintenta en el siguiente ciclo */ });
@@ -42,7 +58,22 @@ export function PracticaControl({ workshopId }: { workshopId: number }) {
     return () => { active = false; window.clearInterval(timer); };
   }, [workshopId]);
 
-  const running = cameras.some(camera => camera.running);
+  // Equipo detectado y límite por cámara (se mide al iniciar la primera práctica).
+  const loadRendimiento = useCallback(() => {
+    const token = authService.getCurrentUser()?.token;
+    if (!token) return;
+    fetch(`${API_BASE}/modules/ai_vision/rendimiento`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(response => (response.ok ? response.json() as Promise<Rendimiento> : null))
+      .then(data => { if (data) setRendimiento(data); })
+      .catch(() => { /* informativo */ });
+  }, []);
+  useEffect(() => { loadRendimiento(); }, [loadRendimiento]);
+
+  // Práctica iniciada o detenida desde otro equipo, o cámaras del taller cambiadas.
+  useServerChanges(['practica', 'workshops', 'cameras'], () => { void refresh(); loadRendimiento(); });
+
+  // En curso aunque aún no haya cámaras: las que se asignen después se analizan al guardar.
+  const running = active || cameras.some(camera => camera.running);
 
   const toggle = async () => {
     const clear = !running && canClear && clearPrevious;
@@ -87,6 +118,15 @@ export function PracticaControl({ workshopId }: { workshopId: number }) {
               ? `${analyses} análisis (≈${rate.toFixed(1)}/s por cámara) · ${alerts} alertas. Continúa aunque cierres esta página.`
               : 'Al iniciar, se analizan todas las cámaras asignadas a este taller.'}
           </p>
+          {rendimiento && (
+            <p className="text-[10px] text-gray-500">
+              {rendimiento.measured && rendimiento.ms_per_analysis
+                ? `Equipo: ${rendimiento.device} · ${(rendimiento.ms_per_analysis / 1000).toFixed(2)} s por análisis · `
+                : 'El equipo se mide al iniciar la primera práctica · '}
+              hasta {rendimiento.max_fps} análisis/s por cámara ({rendimiento.manual ? 'fijado a mano' : 'automático'})
+            </p>
+          )}
+          {rendimiento?.hint && <p className="text-[10px] text-amber-300">{rendimiento.hint}</p>}
           {message && <p role="alert" className="mt-1 text-[11px] text-amber-400">{message}</p>}
           {!running && canClear && (
             <label className="mt-1 flex items-center gap-1.5 text-[11px] text-gray-300">
