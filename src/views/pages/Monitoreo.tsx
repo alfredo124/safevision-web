@@ -1,10 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Trash2, AlertTriangle, Maximize2, X, Camera } from 'lucide-react';
 import { authService } from '../../services/authService';
+import { reglasLabService } from '../../services/reglasLabService';
+import { OverlayCanvas } from '../components/CameraOverlay';
+import { EstadoCamara } from '../components/EstadoCamara';
+import { useCameraOverlay, type EquipmentInfo, type OverlayMessage } from '../../hooks/useCameraOverlay';
 
 const API_URL = 'http://localhost:8000';
-const cameraFeedUrl = (cameraId: string, token: string) =>
-  `${API_URL}/modules/ai_vision/video_feed/${cameraId.replace('cam-', '')}?token=${encodeURIComponent(token)}`;
+const cameraFeedUrl = (cameraId: string, token: string, sync = true) =>
+  `${API_URL}/modules/ai_vision/video_feed/${cameraId.replace('cam-', '')}?token=${encodeURIComponent(token)}&sync=${sync}`;
+
+const SYNC_KEY = 'safevision_sync_video';
+const readSyncPreference = () => {
+  try {
+    return localStorage.getItem(SYNC_KEY) !== 'false';
+  } catch {
+    return true;
+  }
+};
 
 async function fetchAvailableCameras(token: string): Promise<AvailableCamera[]> {
   const response = await fetch(`${API_URL}/modules/ai_vision/cameras/available`, {
@@ -16,28 +29,9 @@ async function fetchAvailableCameras(token: string): Promise<AvailableCamera[]> 
 }
 
 // 1. Interfaces y Tipos
-interface BoundingBox {
-  id: string;
-  label: string;
-  color: string;
-  top: string;
-  left: string;
-  width: string;
-  height: string;
-  gravedad?: string;
-  consecuencia?: string;
-}
-
 interface CameraData {
   id: string;
   nombre: string;
-  boxes: BoundingBox[];
-}
-
-interface DetectionPayload {
-  name: string;
-  conf: number;
-  box: [number, number, number, number];
 }
 
 interface CameraApiResponse {
@@ -58,90 +52,64 @@ interface AvailableCamera {
 const mapCamera = (camera: CameraApiResponse): CameraData => ({
   id: `cam-${camera.id}`,
   nombre: camera.name,
-  boxes: []
 });
 
-const getSeverityStyles = (color: string) => {
-  switch (color) {
-    case '#ef4444':
-      return {
-        container: 'bg-red-950/30 border-red-500',
-        text: 'text-red-400',
-        badge: 'bg-red-500/20 border-red-500/30 text-red-400'
-      };
-    case '#f59e0b':
-      return {
-        container: 'bg-amber-950/30 border-amber-500',
-        text: 'text-amber-400',
-        badge: 'bg-amber-500/20 border-amber-500/30 text-amber-400'
-      };
-    case '#eab308':
-    default:
-      return {
-        container: 'bg-yellow-950/30 border-yellow-500',
-        text: 'text-yellow-400',
-        badge: 'bg-yellow-500/20 border-yellow-500/30 text-yellow-400'
-      };
-  }
-};
+const numericId = (cameraId: string) => Number(cameraId.replace('cam-', ''));
 
-function CameraCard({ 
-  camera, 
+const getSeverityStyles = (state: string) => state === 'INCUMPLE'
+  ? { container: 'bg-red-950/30 border-red-500', text: 'text-red-400', badge: 'bg-red-500/20 border-red-500/30 text-red-400' }
+  : { container: 'bg-amber-950/30 border-amber-500', text: 'text-amber-400', badge: 'bg-amber-500/20 border-amber-500/30 text-amber-400' };
+
+function CameraCard({
+  camera,
+  equipment,
+  sync,
+  paused,
   onDelete,
-  onExpand 
-}: { 
-  camera: CameraData; 
-  onDelete: (id: string, e: React.MouseEvent) => void; 
+  onExpand,
+  onOverlay,
+}: {
+  camera: CameraData;
+  equipment: EquipmentInfo;
+  sync: boolean;
+  /** Mientras hay una cámara ampliada, la miniatura suelta su conexión de video
+   *  (el navegador admite ~6 conexiones por servidor). */
+  paused: boolean;
+  onDelete: (id: string, e: React.MouseEvent) => void;
   onExpand: (id: string) => void;
+  onOverlay: (id: string, message: OverlayMessage | null) => void;
 }) {
-  const [boxes, setBoxes] = useState<BoundingBox[]>([]);
   const token = authService.getCurrentUser()?.token;
-
-  // WebSocket para metadata en tiempo real
-  useEffect(() => {
-    if (!token) return;
-    const cameraId = camera.id.replace('cam-', '');
-    const socket = new WebSocket(`ws://localhost:8000/modules/ai_vision/ws/detections/${cameraId}?token=${encodeURIComponent(token)}`);
-      
-      socket.onmessage = (event) => {
-        try {
-          const detections = JSON.parse(event.data) as DetectionPayload[];
-          const newBoxes = detections.map((d, idx) => ({
-            id: `box-${idx}`,
-            label: d.name,
-            color: d.conf > 0.5 ? '#10b981' : '#ef4444',
-            top: `${(d.box[1] / 480) * 100}%`,
-            left: `${(d.box[0] / 640) * 100}%`,
-            width: `${((d.box[2] - d.box[0]) / 640) * 100}%`,
-            height: `${((d.box[3] - d.box[1]) / 480) * 100}%`
-          }));
-          setBoxes(newBoxes);
-        } catch {
-          console.error("Error al procesar detecciones");
-        }
-      };
-    return () => socket.close();
-  }, [camera.id, token]);
+  // Mensajes del motor (recuadros). El video llega limpio.
+  const overlay = useCameraOverlay(numericId(camera.id), token, sync);
+  useEffect(() => onOverlay(camera.id, overlay), [camera.id, overlay, onOverlay]);
+  const videoRef = useRef<HTMLImageElement>(null);
+  const people = overlay?.people ?? [];
+  const status = !overlay?.monitoring
+    ? 'Práctica no iniciada'
+    : overlay.warming_up
+      ? 'Sincronizando…'
+      : `${people.length} persona(s) · ${people.filter(person => person.state === 'INCUMPLE').length} con falta`;
 
   return (
-    <div 
+    <div
       onClick={() => onExpand(camera.id)}
       className="relative bg-black rounded border border-gray-800 overflow-hidden flex flex-col w-full h-full group cursor-pointer hover:border-emerald-500/50 transition-colors"
     >
       <div className="absolute top-2 left-2 z-10 bg-black/70 backdrop-blur-md text-xs px-2.5 py-1 rounded text-white font-semibold border border-gray-700 flex items-center gap-2">
         <span>{camera.nombre}</span>
-        <span>{boxes.length} detecciones</span>
+        <span className="font-normal text-gray-300">{status}</span>
       </div>
 
       <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button 
+        <button
           onClick={(e) => { e.stopPropagation(); onExpand(camera.id); }}
           className="bg-gray-800/80 hover:bg-gray-700 text-white p-1 rounded border border-gray-600"
           title="Ampliar pantalla"
         >
           <Maximize2 className="w-3.5 h-3.5" />
         </button>
-        <button 
+        <button
           onClick={(e) => onDelete(camera.id, e)}
           className="bg-red-600/80 hover:bg-red-600 text-white p-1 rounded"
           title="Eliminar cámara"
@@ -151,11 +119,19 @@ function CameraCard({
       </div>
 
       <div className="relative flex-1 bg-[#1a1a1a] flex items-center justify-center overflow-hidden min-h-[220px]">
-        <img 
-          src={token ? cameraFeedUrl(camera.id, token) : undefined}
-          alt={camera.nombre} 
-          className="w-full h-full object-cover opacity-75" 
-        />
+        {paused ? (
+          <span className="text-[11px] text-gray-500">Video en pausa mientras se amplía otra vista</span>
+        ) : (
+          <img
+            key={`${camera.id}-${sync}`}
+            ref={videoRef}
+            src={token ? cameraFeedUrl(camera.id, token, sync) : undefined}
+            alt={camera.nombre}
+            className="w-full h-full object-contain"
+          />
+        )}
+        <OverlayCanvas message={overlay} equipment={equipment} />
+        {!paused && <EstadoCamara key={`estado-${sync}`} overlay={overlay} videoRef={videoRef} />}
       </div>
     </div>
   );
@@ -180,6 +156,28 @@ export function MonitoreoPage() {
   const [addingDeviceIndex, setAddingDeviceIndex] = useState<number | null>(null);
 
   const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
+  const expandedVideoRef = useRef<HTMLImageElement>(null);
+  const [overlays, setOverlays] = useState<Record<string, OverlayMessage | null>>({});
+  const [equipment, setEquipment] = useState<EquipmentInfo>({});
+  // Sincronizado: recuadros exactos, video con el retraso del análisis. En vivo: sin retraso, recuadros atrasados.
+  const [syncVideo, setSyncVideo] = useState(readSyncPreference);
+  const toggleSync = () => setSyncVideo(current => {
+    try { localStorage.setItem(SYNC_KEY, String(!current)); } catch { /* sin almacenamiento local */ }
+    return !current;
+  });
+
+  const handleOverlay = useCallback((id: string, message: OverlayMessage | null) => {
+    setOverlays(current => (current[id] === message ? current : { ...current, [id]: message }));
+  }, []);
+
+  useEffect(() => {
+    if (!token) return;
+    reglasLabService.getConfiguration()
+      .then(configuration => setEquipment(Object.fromEntries(
+        configuration.catalog.map(item => [item.id, { icon: item.icon, name: item.name }]),
+      )))
+      .catch(() => { /* sin catálogo se muestran solo los códigos */ });
+  }, [token]);
 
   useEffect(() => {
     if (!token) {
@@ -323,13 +321,16 @@ export function MonitoreoPage() {
   };
 
   const selectedCamera = cameras.find((c) => c.id === selectedCameraId);
-  const activeInfracciones = cameras.flatMap((c) => 
-    c.boxes.filter((b) => b.gravedad).map((b) => ({ ...b, camNombre: c.nombre }))
+  const visiblePeople = cameras.flatMap((c) =>
+    (overlays[c.id]?.people ?? []).map((person) => ({ ...person, camNombre: c.nombre }))
   );
-
-  const totalGraves = activeInfracciones.filter((i) => i.color === '#ef4444').length;
-  const totalModeradas = activeInfracciones.filter((i) => i.color === '#f59e0b').length;
-  const totalLeves = activeInfracciones.filter((i) => i.color === '#eab308').length;
+  // Detecciones del motor en este momento (no son incidencias validadas).
+  const activeInfracciones = visiblePeople.filter((person) => person.state === 'INCUMPLE' || person.state === 'EN_RIESGO');
+  const monitoredCameras = cameras.filter((c) => overlays[c.id]?.monitoring).length;
+  const totalGraves = visiblePeople.filter((person) => person.state === 'INCUMPLE').length;
+  const totalModeradas = visiblePeople.filter((person) => person.state === 'EN_RIESGO').length;
+  const totalLeves = visiblePeople.filter((person) => person.state === 'CUMPLE').length;
+  const equipmentLabel = (id: string, code: string | null) => `${equipment[id]?.icon ?? ''} ${equipment[id]?.name ?? id}${code ? ` (${code})` : ''}`;
 
   return (
     <div className="relative flex flex-1 h-full overflow-hidden">
@@ -340,26 +341,26 @@ export function MonitoreoPage() {
             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">
               Estadísticas del Ambiente Activo
             </h3>
-            
+
             <div className="text-xs space-y-2 text-gray-300 bg-gray-900/60 p-3 rounded border border-gray-800">
               <p className="flex justify-between items-center">
                 <span className="text-gray-400">Cámaras Activas:</span>
                 <strong className="text-white font-mono">{cameras.length}</strong>
               </p>
               <p className="flex justify-between items-center">
-                <span className="text-gray-400">Cumplimiento Global:</span>
-                <strong className="text-emerald-400 font-mono">89%</strong>
+                <span className="text-gray-400">En práctica (analizando):</span>
+                <strong className="text-emerald-400 font-mono">{monitoredCameras}</strong>
               </p>
               <p className="flex justify-between items-center border-t border-gray-800 pt-2">
-                <span className="text-gray-400">Infracciones Totales:</span>
-                <strong className="text-white font-mono">{activeInfracciones.length}</strong>
+                <span className="text-gray-400">Personas visibles:</span>
+                <strong className="text-white font-mono">{visiblePeople.length}</strong>
               </p>
 
               <div className="pl-2 space-y-1.5 border-l-2 border-gray-700 mt-2">
                 <div className="flex justify-between items-center">
                   <span className="flex items-center gap-1.5 text-red-400">
                     <span className="w-2 h-2 rounded-full bg-red-500" />
-                    Críticas / Graves:
+                    Con falta detectada:
                   </span>
                   <strong className="text-red-400 font-mono">{totalGraves}</strong>
                 </div>
@@ -367,29 +368,48 @@ export function MonitoreoPage() {
                 <div className="flex justify-between items-center">
                   <span className="flex items-center gap-1.5 text-amber-400">
                     <span className="w-2 h-2 rounded-full bg-amber-500" />
-                    Moderadas:
+                    Verificando:
                   </span>
                   <strong className="text-amber-400 font-mono">{totalModeradas}</strong>
                 </div>
 
                 <div className="flex justify-between items-center">
-                  <span className="flex items-center gap-1.5 text-yellow-400">
-                    <span className="w-2 h-2 rounded-full bg-yellow-500" />
-                    Leves:
+                  <span className="flex items-center gap-1.5 text-emerald-400">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                    Cumplen lo verificable:
                   </span>
-                  <strong className="text-yellow-400 font-mono">{totalLeves}</strong>
+                  <strong className="text-emerald-400 font-mono">{totalLeves}</strong>
                 </div>
               </div>
             </div>
           </div>
 
+          <div className="space-y-1.5">
+            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Video</h3>
+            <div className="grid grid-cols-2 gap-1 rounded border border-gray-800 bg-gray-900/60 p-1 text-[11px]">
+              <button onClick={() => !syncVideo && toggleSync()} className={`rounded px-2 py-1 font-semibold ${syncVideo ? 'bg-emerald-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+                Sincronizado
+              </button>
+              <button onClick={() => syncVideo && toggleSync()} className={`rounded px-2 py-1 font-semibold ${!syncVideo ? 'bg-emerald-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+                En vivo
+              </button>
+            </div>
+            <p className="text-[10px] text-gray-500">
+              {syncVideo
+                ? 'Los recuadros coinciden con el video; el video va con el retraso del análisis.'
+                : 'Video sin retraso; los recuadros pueden ir un poco atrasados.'}
+            </p>
+          </div>
+
           <div className="space-y-3">
-            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Infracciones Detectadas</h3>
-            {activeInfracciones.map((inf, idx) => {
-              const styles = getSeverityStyles(inf.color);
+            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Detecciones en curso</h3>
+            <p className="text-[10px] text-gray-500">Avisos del motor: el encargado debe confirmarlos.</p>
+            {activeInfracciones.map((inf) => {
+              const styles = getSeverityStyles(inf.state);
+              const items = inf.state === 'INCUMPLE' ? inf.missing : inf.at_risk;
               return (
-                <div 
-                  key={idx} 
+                <div
+                  key={`${inf.camNombre}-${inf.track_id}`}
                   className={`p-2.5 border-l-4 rounded text-xs space-y-1 ${styles.container}`}
                 >
                   <div className={`flex items-center justify-between font-bold ${styles.text}`}>
@@ -397,18 +417,27 @@ export function MonitoreoPage() {
                       <AlertTriangle className="w-3.5 h-3.5" /> {inf.label}
                     </span>
                     <span className={`text-[10px] px-1.5 py-0.2 rounded uppercase border ${styles.badge}`}>
-                      {inf.gravedad}
+                      {inf.severity ?? `${Math.round(inf.progress * 100)}%`}
                     </span>
                   </div>
                   <p className="text-gray-300 text-[11px]">
-                    <strong className="text-gray-200">Ubicación:</strong> {inf.camNombre}
+                    <strong className="text-gray-200">Ubicación:</strong> {inf.camNombre} · persona {inf.track_id}
                   </p>
-                  <p className="text-gray-400 text-[11px] italic">
-                    <strong className="text-gray-300">Consecuencia:</strong> {inf.consecuencia}
-                  </p>
+                  {items.map((item) => (
+                    <p key={item.equipment_id} className="text-gray-300 text-[11px]">{equipmentLabel(item.equipment_id, item.rule_code)}</p>
+                  ))}
                 </div>
               );
             })}
+            {activeInfracciones.length === 0 && <p className="text-[11px] text-gray-500">Sin detecciones en este momento.</p>}
+            {visiblePeople.some((person) => person.manual.length > 0) && (
+              <div className="rounded border border-gray-800 bg-gray-900/60 p-2 text-[11px] text-gray-400">
+                <strong className="text-gray-300">Verificación manual (sin detector):</strong>
+                {Array.from(new Map(visiblePeople.flatMap((person) => person.manual).map((item) => [item.equipment_id, item])).values()).map((item) => (
+                  <p key={item.equipment_id}>{equipmentLabel(item.equipment_id, item.rule_code)}</p>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </aside>
@@ -424,11 +453,15 @@ export function MonitoreoPage() {
           </div>
         )}
         {cameras.map((camera) => (
-          <CameraCard 
-            key={camera.id} 
-            camera={camera} 
+          <CameraCard
+            key={camera.id}
+            camera={camera}
+            equipment={equipment}
+            sync={syncVideo}
+            paused={selectedCameraId !== null}
             onDelete={handleDeleteCamera}
             onExpand={(id) => setSelectedCameraId(id)}
+            onOverlay={handleOverlay}
           />
         ))}
 
@@ -553,7 +586,7 @@ export function MonitoreoPage() {
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
               <h2 className="text-sm font-bold text-white uppercase tracking-wide">{selectedCamera.nombre}</h2>
             </div>
-            <button 
+            <button
               onClick={() => setSelectedCameraId(null)}
               className="flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white px-3 py-1.5 rounded border border-gray-700 text-xs font-semibold transition-colors"
             >
@@ -563,11 +596,15 @@ export function MonitoreoPage() {
           </div>
 
                     <div className="relative flex-1 bg-black rounded border border-gray-800 overflow-hidden flex items-center justify-center">
-            <img 
-              src={cameraFeedUrl(selectedCamera.id, token)}
-              alt={selectedCamera.nombre} 
-              className="w-full h-full object-contain" 
+            <img
+              key={`ampliada-${selectedCamera.id}-${syncVideo}`}
+              ref={expandedVideoRef}
+              src={cameraFeedUrl(selectedCamera.id, token, syncVideo)}
+              alt={selectedCamera.nombre}
+              className="w-full h-full object-contain"
             />
+            <OverlayCanvas message={overlays[selectedCamera.id] ?? null} equipment={equipment} />
+            <EstadoCamara key={`estado-ampliada-${selectedCamera.id}-${syncVideo}`} overlay={overlays[selectedCamera.id] ?? null} videoRef={expandedVideoRef} />
           </div>
         </div>
       )}

@@ -4,7 +4,9 @@ const API_URL = 'http://localhost:8000/modules/reglas_lab';
 
 export type LaboratoryType = 'QUIMICA' | 'FISICA';
 export type Severity = 'CRÍTICO' | 'ALTO' | 'MEDIO';
-export type IncidentStatus = 'PENDIENTE' | 'EN_REVISION' | 'ATENDIDO';
+export type IncidentStatus = 'PENDIENTE' | 'EN_REVISION' | 'CONFIRMADA' | 'DESCARTADA' | 'ATENDIDO';
+export type ManualStatus = 'PENDIENTE' | 'EN_REVISION' | 'ATENDIDO';
+export type ReviewAction = 'CORREGIDO' | 'RETIRADO_DE_PRACTICA';
 
 export interface CameraSummary {
   id: number;
@@ -42,6 +44,16 @@ export interface RulesConfiguration {
   available_cameras: CameraSummary[];
 }
 
+export interface IncidentFault {
+  id: number | null;
+  equipment_id: string | null;
+  equipment_name: string | null;
+  rule_code: string | null;
+  severity: Severity;
+  has_capture: boolean;
+  detected_at: string;
+}
+
 export interface Incident {
   id: number;
   code: string;
@@ -61,6 +73,34 @@ export interface Incident {
   frame_width: number | null;
   frame_height: number | null;
   occurred_at: string;
+  rule_code: string | null;
+  has_capture: boolean;
+  created_by_system: boolean;
+  reviewed_by_name: string | null;
+  reviewed_at: string | null;
+  review_reason: string | null;
+  action_taken: ReviewAction | null;
+  faults: IncidentFault[];
+}
+
+export interface CameraMonitoringStatus {
+  camera_id: number;
+  running: boolean;
+  workshop_id?: number | null;
+  error?: string | null;
+  analyses?: number;
+  events?: number;
+  viewers?: number;
+  started_at?: number;
+  started?: boolean;
+  stopped?: boolean;
+  detail?: string;
+}
+
+export interface MonitoringResponse {
+  workshop_id: number;
+  cameras: CameraMonitoringStatus[];
+  cleared_incidents?: number;
 }
 
 export interface IncidentDraft {
@@ -114,6 +154,25 @@ export const reglasLabService = {
   },
   createIncident: (payload: IncidentDraft) =>
     request<Incident>('/incidents', { method: 'POST', body: JSON.stringify(payload) }),
-  updateIncidentStatus: (incidentId: number, status: IncidentStatus) =>
+  /** Confirmar (con la acción tomada) o descartar una alerta. El revisor sale de la sesión. */
+  reviewIncident: (incidentId: number, payload: { decision: 'CONFIRMADA'; action: ReviewAction } | { decision: 'DESCARTADA'; reason?: string }) =>
+    request<Incident>(`/incidents/${incidentId}/review`, { method: 'POST', body: JSON.stringify(payload) }),
+  updateIncidentStatus: (incidentId: number, status: ManualStatus) =>
     request<Incident>(`/incidents/${incidentId}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+  getMonitoring: (workshopId: number) => request<MonitoringResponse>(`/workshops/${workshopId}/monitoring`),
+  startMonitoring: (workshopId: number, clearPrevious = false) =>
+    request<MonitoringResponse>(`/workshops/${workshopId}/monitoring/start`, {
+      method: 'POST', body: JSON.stringify({ clear_previous: clearPrevious }),
+    }),
+  /** Fase de prueba: si el usuario puede borrar las incidencias previas al iniciar. */
+  getTestMode: () => request<{ enabled: boolean; can_clear: boolean }>('/test-mode'),
+  stopMonitoring: (workshopId: number) =>
+    request<MonitoringResponse>(`/workshops/${workshopId}/monitoring/stop`, { method: 'POST' }),
+  /** Descarga la captura con el token en la cabecera (no en la URL) y devuelve una URL local. */
+  getIncidentCaptureUrl: async (incidentId: number, faultId?: number | null): Promise<string> => {
+    const path = faultId ? `/incidents/${incidentId}/faults/${faultId}/capture` : `/incidents/${incidentId}/capture`;
+    const response = await fetch(`${API_URL}${path}`, { headers: authHeaders() });
+    if (!response.ok) throw new Error(`No se pudo cargar la captura (${response.status}).`);
+    return URL.createObjectURL(await response.blob());
+  },
 };

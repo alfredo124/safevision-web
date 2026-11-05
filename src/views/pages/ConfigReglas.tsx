@@ -4,6 +4,7 @@ import {
   Plus, Trash2, FileCode, PlusCircle, X 
 } from 'lucide-react';
 import { authService } from '../../services/authService';
+import { PracticaControl } from '../components/PracticaControl';
 import { reglasLabService, type CameraSummary, type LaboratoryType, type RulesConfiguration, type SafetyEquipment, type Workshop } from '../../services/reglasLabService';
 
 interface EPPItem {
@@ -314,6 +315,8 @@ export function ConfigReglasPage() {
             <span>Cargar Protocolo de Seguridad (Python)</span>
           </button>
         </div>
+
+        <PracticaControl key={activeAmbiente.id} workshopId={activeAmbiente.id} />
 
         {error && <p role="alert" className="rounded border border-red-900 bg-red-950/30 px-3 py-2 text-sm text-red-300">{error}</p>}
         {isSaving && <p className="text-xs text-emerald-400">Guardando cambios...</p>}

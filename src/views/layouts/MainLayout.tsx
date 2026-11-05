@@ -2,6 +2,7 @@ import React from 'react';
 import { Outlet } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { Sidebar } from '../components/Sidebar';
+import { AlertasPanel } from '../components/AlertasPanel';
 
 export function MainLayout() {
   return (
@@ -18,6 +19,9 @@ export function MainLayout() {
           <Outlet />
         </main>
       </div>
+
+      {/* Alertas pendientes de validación: visibles en cualquier página */}
+      <AlertasPanel />
     </div>
   );
 }
