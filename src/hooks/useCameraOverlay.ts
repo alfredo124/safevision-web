@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-
-const WS_URL = 'ws://localhost:8000';
+import { WS_BASE as WS_URL } from '../services/apiConfig';
 /** Un mensaje se considera viejo tras 3 s o 2.5 intervalos de análisis, lo que sea mayor
  *  (con varias cámaras en CPU cada una se analiza solo ~0.3 veces/s). */
 const MIN_STALE_MS = 3000;

@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Configuración local (la dirección del backend va en .env.local)
+.env
+.env.*
+!.env.example

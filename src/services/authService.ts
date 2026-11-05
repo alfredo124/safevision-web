@@ -1,4 +1,5 @@
 // src/services/authService.ts
+import { API_BASE as API_URL } from './apiConfig';
 export interface UserSession {
   email: string;
   campus: string;
@@ -19,7 +20,6 @@ export interface AuthResponse {
 }
 
 const SESSION_KEY = 'safevision_session';
-const API_URL = 'http://localhost:8000'; // Ajusta según la URL de tu backend
 
 export const authService = {
   login: async (credentials: LoginCredentials): Promise<AuthResponse> => {

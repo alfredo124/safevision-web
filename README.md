@@ -1,103 +1,49 @@
 # SafeVision Web
 
-Frontend del sistema SafeVision, desarrollado con React + TypeScript + Vite.
+Frontend de SafeVision (React + TypeScript + Vite + Tailwind): inicio de sesión, monitoreo con los recuadros del
+motor dibujados sobre el video, alertas por validar, incidencias, reglas por taller y reportes.
 
-## Descripción
-Este proyecto contiene la interfaz de usuario para el sistema de monitoreo de EPP, donde se muestran:
-- login de usuarios
-- dashboard de monitoreo
-- visualización de incidencias
-- reportes y configuración de reglas
-- navegación principal para el usuario administrador
+> **Guía completa de instalación del equipo:** está en el README del backend
+> (`safevison_baken/README.md`, sección *Guía rápida de instalación*). Aquí solo va lo del frontend.
 
-## Requisitos previos
-Antes de instalar dependencias, asegúrate de tener:
-- Node.js 18 o superior
-- npm o yarn
-- acceso a la carpeta del proyecto
+## Instalar y arrancar (Windows)
+1. Requisito: **Node.js 20 o superior, versión LTS** (https://nodejs.org).
+2. Doble clic en `instalar.bat` (una vez): ejecuta `npm install`.
+3. Doble clic en `iniciar.bat` (cada vez): sirve la web en el puerto 5173 para este equipo y la red local.
+4. Abre http://localhost:5173. Desde otro equipo o el celular, usa la dirección *Network* que muestra la ventana.
 
-## Instalación de dependencias
-Desde la raíz del proyecto `safevision-web`, ejecuta:
+El backend debe estar arrancado (`safevison_baken\iniciar.bat`).
 
-### Windows (PowerShell)
-```powershell
-cd c:\git\universidad\safevision-web
-npm install
-```
+## Dirección del backend
+- Por defecto la web busca el backend **en el mismo equipo que sirve la página, puerto 8000**
+  (por ejemplo, si abres `http://192.168.1.9:5173`, usa `http://192.168.1.9:8000`). No hay que recompilar si cambia la IP.
+- Para otra dirección, copia `.env.example` como `.env.local` y define `VITE_API_URL`
+  (por ejemplo `http://192.168.1.20:8000`). `.env.local` no se sube a Git.
+- Con HTTPS, el WebSocket usa `wss://` automáticamente.
 
-### Linux / macOS
-```bash
-cd /ruta/al/proyecto/safevision-web
-npm install
-```
+## Comandos
+| Comando | Qué hace |
+|---|---|
+| `npm run dev` | Desarrollo, solo en este equipo |
+| `npm run dev:lan` | Desarrollo, accesible desde la red local (lo usa `iniciar.bat`) |
+| `npm run build` | Compila para producción en `dist/` |
+| `npx tsc -b` | Comprueba los tipos de TypeScript (`build` no lo hace) |
+| `npm run lint` | Revisa el código con ESLint |
 
-## Dependencias del proyecto
-El proyecto usa estas librerías principales:
-
-### Producción
-- `react`
-- `react-dom`
-- `react-router-dom`
-- `lucide-react`
-
-### Desarrollo
-- `vite`
-- `typescript`
-- `@vitejs/plugin-react`
-- `eslint`
-- `tailwindcss`
-- `postcss`
-- `autoprefixer`
-
-## Ejecución del frontend
-Para arrancar el proyecto en modo desarrollo:
-
-```bash
-npm run dev
-```
-
-Esto levantará la app en modo Vite, normalmente en:
-- http://localhost:5173
-
-## Build de producción
-Para generar la versión lista para despliegue:
-
-```bash
-npm run build
-```
-
-Luego puedes previsualizarla con:
-
-```bash
-npm run preview
-```
-
-## Verificación rápida
-Si todo está bien, al ejecutar:
-
-```bash
-npm run dev
-```
-
-la terminal mostrará la URL local donde se está sirviendo la aplicación.
-
-## Solución rápida de problemas comunes
-- Si aparece error de módulos, ejecuta `npm install` otra vez.
-- Si hay conflictos de dependencias, borra la carpeta `node_modules` y vuelve a instalar.
-- Si el navegador no carga, revisa que Vite esté levantado en el puerto 5173.
-
-## Estructura del proyecto
+## Estructura
 ```text
-safevision-web/
-├── public/
-├── src/
-├── index.html
-├── package.json
-├── tsconfig.json
-├── vite.config.ts
-├── eslint.config.js
-└── README.md
+src/
+├── hooks/          useAuth, useCameraOverlay (mensajes del motor por WebSocket)
+├── services/       apiConfig (dirección del backend), authService, reglasLabService
+├── views/
+│   ├── components/ AlertasPanel, CameraOverlay, CapturaModal, EstadoCamara, PracticaControl, SnapshotImage, ...
+│   ├── layouts/    MainLayout (incluye el panel global de alertas)
+│   └── pages/      Login, Monitoreo, ConfigReglas, Incidencias, Reportes
+└── main.tsx
 ```
 
-Con estas instrucciones cualquier colaborador puede clonar el proyecto y ejecutar el frontend sin problemas en su entorno local.
-
+## Problemas comunes
+- *Error al conectar con el servidor*: el backend no está arrancado o, desde otro equipo, falta la regla del firewall
+  en el PC servidor (ver la guía del backend).
+- La cámara del celular no se puede usar con `http://`: el navegador exige HTTPS.
+- Errores de módulos: vuelve a ejecutar `instalar.bat`.

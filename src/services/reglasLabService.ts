@@ -1,6 +1,8 @@
 import { authService } from './authService';
 
-const API_URL = 'http://localhost:8000/modules/reglas_lab';
+import { API_BASE } from './apiConfig';
+
+const API_URL = `${API_BASE}/modules/reglas_lab`;
 
 export type LaboratoryType = 'QUIMICA' | 'FISICA';
 export type Severity = 'CRÍTICO' | 'ALTO' | 'MEDIO';

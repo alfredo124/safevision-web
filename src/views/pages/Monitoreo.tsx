@@ -4,9 +4,10 @@ import { authService } from '../../services/authService';
 import { reglasLabService } from '../../services/reglasLabService';
 import { OverlayCanvas } from '../components/CameraOverlay';
 import { EstadoCamara } from '../components/EstadoCamara';
+import { SnapshotImage } from '../components/SnapshotImage';
 import { useCameraOverlay, type EquipmentInfo, type OverlayMessage } from '../../hooks/useCameraOverlay';
 
-const API_URL = 'http://localhost:8000';
+import { API_BASE as API_URL } from '../../services/apiConfig';
 const cameraFeedUrl = (cameraId: string, token: string, sync = true) =>
   `${API_URL}/modules/ai_vision/video_feed/${cameraId.replace('cam-', '')}?token=${encodeURIComponent(token)}&sync=${sync}`;
 
@@ -64,7 +65,6 @@ function CameraCard({
   camera,
   equipment,
   sync,
-  paused,
   onDelete,
   onExpand,
   onOverlay,
@@ -72,9 +72,6 @@ function CameraCard({
   camera: CameraData;
   equipment: EquipmentInfo;
   sync: boolean;
-  /** Mientras hay una cámara ampliada, la miniatura suelta su conexión de video
-   *  (el navegador admite ~6 conexiones por servidor). */
-  paused: boolean;
   onDelete: (id: string, e: React.MouseEvent) => void;
   onExpand: (id: string) => void;
   onOverlay: (id: string, message: OverlayMessage | null) => void;
@@ -119,19 +116,16 @@ function CameraCard({
       </div>
 
       <div className="relative flex-1 bg-[#1a1a1a] flex items-center justify-center overflow-hidden min-h-[220px]">
-        {paused ? (
-          <span className="text-[11px] text-gray-500">Video en pausa mientras se amplía otra vista</span>
-        ) : (
-          <img
-            key={`${camera.id}-${sync}`}
-            ref={videoRef}
-            src={token ? cameraFeedUrl(camera.id, token, sync) : undefined}
-            alt={camera.nombre}
-            className="w-full h-full object-contain"
-          />
-        )}
+        {/* Miniatura: una imagen por segundo, sin conexión de video permanente (Tarea 0B). */}
+        <SnapshotImage
+          ref={videoRef}
+          cameraId={numericId(camera.id)}
+          sync={sync}
+          alt={camera.nombre}
+          className="w-full h-full object-contain"
+        />
         <OverlayCanvas message={overlay} equipment={equipment} />
-        {!paused && <EstadoCamara key={`estado-${sync}`} overlay={overlay} videoRef={videoRef} />}
+        <EstadoCamara key={`estado-${sync}`} overlay={overlay} videoRef={videoRef} />
       </div>
     </div>
   );
@@ -195,11 +189,8 @@ export function MonitoreoPage() {
         const data = await response.json() as CameraApiResponse[];
         setCameras(data.map(mapCamera));
         setCameraError('');
-        setIsDiscoveringCameras(true);
-        void fetchAvailableCameras(token)
-          .then(setAvailableCameras)
-          .catch((reason: unknown) => setCameraError(reason instanceof Error ? reason.message : 'Error al detectar cámaras conectadas.'))
-          .finally(() => setIsDiscoveringCameras(false));
+        // Ya no se buscan cámaras del servidor al cargar (lento y repetido por cada cliente):
+        // solo con el botón "Detectar cámaras conectadas".
       } catch (error) {
         setCameraError(error instanceof Error ? error.message : 'Error al conectar con el backend.');
       } finally {
@@ -458,7 +449,6 @@ export function MonitoreoPage() {
             camera={camera}
             equipment={equipment}
             sync={syncVideo}
-            paused={selectedCameraId !== null}
             onDelete={handleDeleteCamera}
             onExpand={(id) => setSelectedCameraId(id)}
             onOverlay={handleOverlay}
