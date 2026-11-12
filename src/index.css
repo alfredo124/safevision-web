@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Pantalla baja: celular en horizontal. Uso: short:py-1 */
+@custom-variant short (@media (max-height: 500px));
+
 html, body, #root {
   width: 100%;
   height: 100%;

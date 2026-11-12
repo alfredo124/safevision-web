@@ -1,9 +1,12 @@
 import { useServerChanges } from '../../services/changeEvents';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Trash2, AlertTriangle, Maximize2, X, Camera, ChevronDown, ChevronUp, Smartphone } from 'lucide-react';
+import { Plus, Trash2, AlertTriangle, Maximize2, X, Camera, ChevronDown, ChevronUp, Smartphone, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { useCollapsible } from '../../hooks/useCollapsible';
 import { authService } from '../../services/authService';
 import { reglasLabService } from '../../services/reglasLabService';
+import { severityStyle } from '../../services/severity';
+import { detalleFalta } from '../../services/etiquetas';
 import { OverlayCanvas } from '../components/CameraOverlay';
 import { EstadoCamara } from '../components/EstadoCamara';
 import { SnapshotImage } from '../components/SnapshotImage';
@@ -59,9 +62,14 @@ const mapCamera = (camera: CameraApiResponse): CameraData => ({
 
 const numericId = (cameraId: string) => Number(cameraId.replace('cam-', ''));
 
-const getSeverityStyles = (state: string) => state === 'INCUMPLE'
-  ? { container: 'bg-red-950/30 border-red-500', text: 'text-red-400', badge: 'bg-red-500/20 border-red-500/30 text-red-400' }
-  : { container: 'bg-amber-950/30 border-amber-500', text: 'text-amber-400', badge: 'bg-amber-500/20 border-amber-500/30 text-amber-400' };
+// Falta confirmada: color según su gravedad (services/severity). Aún acumulando evidencia: azul.
+const getSeverityStyles = (state: string, severity: string | null | undefined) => {
+  if (state !== 'INCUMPLE') {
+    return { container: 'bg-sky-950/30 border-sky-500', text: 'text-sky-300', badge: 'bg-sky-500/20 border-sky-500/30 text-sky-300' };
+  }
+  const style = severityStyle(severity);
+  return { container: style.card, text: style.text, badge: style.badge };
+};
 
 function CameraCard({
   camera,
@@ -93,7 +101,7 @@ function CameraCard({
   return (
     <div
       onClick={() => onExpand(camera.id)}
-      className="relative bg-black rounded border border-gray-800 overflow-hidden flex flex-col w-full h-full group cursor-pointer hover:border-emerald-500/50 transition-colors"
+      className="relative bg-black rounded border border-gray-800 overflow-hidden flex flex-col w-full min-h-[52vw] sm:min-h-0 short:sm:min-h-[170px] sm:h-full group cursor-pointer hover:border-emerald-500/50 transition-colors"
     >
       <div className="absolute top-2 left-2 right-20 md:right-auto z-10 bg-black/70 backdrop-blur-md text-xs px-2.5 py-1 rounded text-white font-semibold border border-gray-700 flex flex-wrap items-center gap-x-2">
         <span>{camera.nombre}</span>
@@ -117,8 +125,10 @@ function CameraCard({
         </button>
       </div>
 
-      <div className="relative flex-1 bg-[#1a1a1a] flex items-center justify-center overflow-hidden aspect-video sm:aspect-auto sm:min-h-[220px]">
-        {/* Miniatura: una imagen por segundo, sin conexión de video permanente (Tarea 0B). */}
+      {/* Celular en vertical: la tarjeta lleva un alto mínimo (~16:9 del ancho). Por su overflow-hidden, la
+          cuadrícula la encogía para que todas cupieran en pantalla y la miniatura quedaba en ~66 px. */}
+      <div className="relative flex-1 bg-[#1a1a1a] flex items-center justify-center overflow-hidden sm:min-h-[220px] short:sm:min-h-[150px]">
+        {/* Miniatura: imágenes sueltas seguidas (~6 por segundo), sin conexión de video permanente (Tarea 0B). */}
         <SnapshotImage
           ref={videoRef}
           cameraId={numericId(camera.id)}
@@ -151,7 +161,9 @@ export function MonitoreoPage() {
   const [isDiscoveringCameras, setIsDiscoveringCameras] = useState(false);
   const [addingDeviceIndex, setAddingDeviceIndex] = useState<number | null>(null);
   const [isCreatingBrowserCamera, setIsCreatingBrowserCamera] = useState(false);
-  const [statsOpen, setStatsOpen] = useState(false);  // solo celular; en escritorio siempre visible
+  const [statsOpen, setStatsOpen] = useState(false);  // celular en vertical: acordeón sobre las cámaras
+  // Pantallas anchas (PC, celular en horizontal): panel lateral plegable a una franja.
+  const [panelCollapsed, togglePanel] = useCollapsible('panel_monitoreo');
   const navigate = useNavigate();
 
   const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
@@ -353,7 +365,7 @@ export function MonitoreoPage() {
 
   const selectedCamera = cameras.find((c) => c.id === selectedCameraId);
   const visiblePeople = cameras.flatMap((c) =>
-    (overlays[c.id]?.people ?? []).map((person) => ({ ...person, camNombre: c.nombre }))
+    (overlays[c.id]?.people ?? []).map((person) => ({ ...person, camNombre: c.nombre, camId: c.id }))
   );
   // Detecciones del motor en este momento (no son incidencias validadas).
   const activeInfracciones = visiblePeople.filter((person) => person.state === 'INCUMPLE' || person.state === 'EN_RIESGO');
@@ -365,8 +377,19 @@ export function MonitoreoPage() {
 
   return (
     <div className="relative flex flex-1 flex-col md:flex-row h-full overflow-hidden">
-      {/* Estadísticas. Celular: acordeón plegable sobre las cámaras. Escritorio: panel lateral. */}
-      <aside className="w-full md:w-72 shrink-0 bg-[#16181e] border-b md:border-b-0 md:border-r border-gray-800 flex flex-col md:justify-between p-0 md:p-4 max-h-[45dvh] md:max-h-none overflow-y-auto">
+      {/* Estadísticas. Celular en vertical: acordeón sobre las cámaras. Pantallas anchas: panel lateral plegable. */}
+      <aside className={`w-full shrink-0 bg-[#16181e] border-b md:border-b-0 md:border-r border-gray-800 flex flex-col p-0 max-h-[45dvh] md:max-h-none overflow-y-auto ${panelCollapsed ? 'md:w-12 md:items-center md:py-2' : 'md:w-72 md:p-4 short:md:p-3'}`}>
+        {panelCollapsed && (
+          // Franja plegada: botón para abrir y resumen de faltas, sin quitar espacio a las cámaras.
+          <div className="hidden md:flex flex-col items-center gap-3">
+            <button onClick={togglePanel} title="Mostrar el panel" aria-label="Mostrar el panel" aria-expanded={false}
+              className="rounded-md p-2 text-gray-400 hover:bg-gray-800/50 hover:text-white">
+              <PanelLeftOpen className="h-4 w-4" />
+            </button>
+            <span title="Personas con falta" className={`rounded px-1.5 py-0.5 font-mono text-xs font-bold ${totalGraves ? 'bg-red-500/20 text-red-300' : 'text-gray-500'}`}>{totalGraves}</span>
+            <span title="En práctica" className="font-mono text-[10px] text-emerald-400">{monitoredCameras}/{cameras.length}</span>
+          </div>
+        )}
         <button
           onClick={() => setStatsOpen(open => !open)}
           aria-expanded={statsOpen}
@@ -382,11 +405,17 @@ export function MonitoreoPage() {
             {statsOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
           </span>
         </button>
-        <div className={`${statsOpen ? 'block' : 'hidden'} md:block space-y-6 px-3 pb-3 md:p-0`}>
+        <div className={`${statsOpen ? 'block' : 'hidden'} ${panelCollapsed ? 'md:hidden' : 'md:block'} space-y-6 short:md:space-y-4 px-3 pb-3 md:p-0`}>
           <div className="space-y-3">
-            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-              Estadísticas del Ambiente Activo
-            </h3>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                Estadísticas del Ambiente Activo
+              </h3>
+              <button onClick={togglePanel} title="Plegar el panel" aria-label="Plegar el panel" aria-expanded
+                className="hidden md:block shrink-0 rounded-md p-1 text-gray-500 hover:bg-gray-800/50 hover:text-white">
+                <PanelLeftClose className="h-4 w-4" />
+              </button>
+            </div>
 
             <div className="text-xs space-y-2 text-gray-300 bg-gray-900/60 p-3 rounded border border-gray-800">
               <p className="flex justify-between items-center">
@@ -412,11 +441,11 @@ export function MonitoreoPage() {
                 </div>
 
                 <div className="flex justify-between items-center">
-                  <span className="flex items-center gap-1.5 text-amber-400">
-                    <span className="w-2 h-2 rounded-full bg-amber-500" />
+                  <span className="flex items-center gap-1.5 text-sky-400">
+                    <span className="w-2 h-2 rounded-full bg-sky-500" />
                     Verificando:
                   </span>
-                  <strong className="text-amber-400 font-mono">{totalModeradas}</strong>
+                  <strong className="text-sky-400 font-mono">{totalModeradas}</strong>
                 </div>
 
                 <div className="flex justify-between items-center">
@@ -449,30 +478,36 @@ export function MonitoreoPage() {
 
           <div className="space-y-3">
             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Detecciones en curso</h3>
-            <p className="text-[10px] text-gray-500">Avisos del motor: el encargado debe confirmarlos.</p>
+            <p className="text-[10px] text-gray-500">Avisos del motor: el encargado debe confirmarlos. Toca uno para ver su cámara.</p>
             {activeInfracciones.map((inf) => {
-              const styles = getSeverityStyles(inf.state);
+              const styles = getSeverityStyles(inf.state, inf.severity);
               const items = inf.state === 'INCUMPLE' ? inf.missing : inf.at_risk;
               return (
-                <div
+                // Al tocarla se amplía la cámara donde ocurre (y en el celular se pliega el panel).
+                <button
+                  type="button"
                   key={`${inf.camNombre}-${inf.track_id}`}
-                  className={`p-2.5 border-l-4 rounded text-xs space-y-1 ${styles.container}`}
+                  onClick={() => { setSelectedCameraId(inf.camId); setStatsOpen(false); }}
+                  title={`Ver la cámara ${inf.camNombre}`}
+                  className={`block w-full text-left p-2.5 border-l-4 rounded text-xs space-y-1 cursor-pointer transition hover:brightness-125 focus:outline-none focus:ring-2 focus:ring-emerald-500 ${styles.container}`}
                 >
                   <div className={`flex items-center justify-between font-bold ${styles.text}`}>
                     <span className="flex items-center gap-1">
                       <AlertTriangle className="w-3.5 h-3.5" /> {inf.label}
                     </span>
                     <span className={`text-[10px] px-1.5 py-0.2 rounded uppercase border ${styles.badge}`}>
-                      {inf.severity ?? `${Math.round(inf.progress * 100)}%`}
+                      {inf.severity ? severityStyle(inf.severity).label : `${Math.round(inf.progress * 100)}%`}
                     </span>
                   </div>
                   <p className="text-gray-300 text-[11px]">
                     <strong className="text-gray-200">Ubicación:</strong> {inf.camNombre} · persona {inf.track_id}
                   </p>
                   {items.map((item) => (
-                    <p key={item.equipment_id} className="text-gray-300 text-[11px]">{equipmentLabel(item.equipment_id, item.rule_code)}</p>
+                    <p key={item.equipment_id} className="text-gray-300 text-[11px]">
+                      {equipmentLabel(item.equipment_id, item.rule_code)}{'detail' in item && item.detail ? ` · ${detalleFalta(item.detail)}` : ''}
+                    </p>
                   ))}
-                </div>
+                </button>
               );
             })}
             {activeInfracciones.length === 0 && <p className="text-[11px] text-gray-500">Sin detecciones en este momento.</p>}
@@ -489,7 +524,7 @@ export function MonitoreoPage() {
       </aside>
 
       {/* Grid de Cámaras */}
-      <div className="flex-1 min-h-0 p-2 md:p-3 grid grid-cols-1 sm:grid-cols-2 content-start sm:content-stretch sm:auto-rows-fr gap-2 md:gap-3 bg-[#0d0e12] w-full overflow-y-auto">
+      <div className="flex-1 min-h-0 p-2 md:p-3 grid grid-cols-1 sm:grid-cols-2 content-start sm:content-stretch sm:auto-rows-fr short:sm:content-start short:sm:auto-rows-auto gap-2 md:gap-3 bg-[#0d0e12] w-full overflow-y-auto">
         {isLoadingCameras && (
           <div className="col-span-full text-sm text-gray-400">Cargando cámaras...</div>
         )}
@@ -511,7 +546,7 @@ export function MonitoreoPage() {
         ))}
 
         {/* Tarjeta Dinámica de Opción de Agregar Cámara */}
-        <div className="border-2 border-dashed border-gray-800 bg-[#12141a]/50 rounded p-4 flex flex-col items-center justify-center gap-3 min-h-[220px]">
+        <div className="border-2 border-dashed border-gray-800 bg-[#12141a]/50 rounded p-4 flex flex-col items-center justify-center gap-3 min-h-[220px] short:min-h-0">
           <div className="w-full space-y-1">
             <button
               onClick={() => void startDeviceCamera()}

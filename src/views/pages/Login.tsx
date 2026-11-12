@@ -1,16 +1,26 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
+import { authService } from '../../services/authService';
 
 export function LoginPage() {
   const { login, loading, error } = useAuth();
+  const navigate = useNavigate();
 
-    const [usuario, setUsuario] = useState('admin');
-  const [password, setPassword] = useState('admin123');
-  const [campus, setCampus] = useState('Arequipa - Parra');
+  // Sin valores precargados: las credenciales las entrega el administrador general.
+  const [usuario, setUsuario] = useState('');
+  const [password, setPassword] = useState('');
+
+  // Primera vez que se usa el sistema (no hay administrador): se crea desde la configuración inicial.
+  useEffect(() => {
+    authService.needsSetup()
+      .then(needs => { if (needs) navigate('/configuracion-inicial', { replace: true }); })
+      .catch(() => { /* sin servidor: el error se verá al intentar ingresar */ });
+  }, [navigate]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    login({ usuario, password, campus });
+    login({ usuario, password });
   };
 
   return (
@@ -54,13 +64,13 @@ export function LoginPage() {
           <form onSubmit={handleSubmit} className="w-full space-y-4">
             <div className="space-y-1">
               <label className="text-xs font-semibold text-gray-700 block">
-                Usuario / Correo UTP:
+                Usuario:
               </label>
               <input
                 type="text"
                 value={usuario}
                 onChange={(e) => setUsuario(e.target.value)}
-                placeholder="admin"
+                autoComplete="username"
                 className="w-full px-3 py-2 text-xs bg-[#eef3fe] border border-blue-200 rounded-lg text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -71,26 +81,16 @@ export function LoginPage() {
               </label>
               <input
                 type="password"
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full px-3 py-2 text-xs bg-[#eef3fe] border border-blue-200 rounded-lg text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
 
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-gray-700 block">
-                Sede / Campus:
-              </label>
-              <select
-                value={campus}
-                onChange={(e) => setCampus(e.target.value)}
-                className="w-full px-3 py-2 text-xs bg-white border border-blue-300 rounded-lg text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
-              >
-                <option value="Arequipa - Parra">Arequipa - Parra</option>
-                <option value="Arequipa - Cerro Colorado">Arequipa - Cerro Colorado</option>
-                <option value="Lima Centro">Lima Centro</option>
-              </select>
-            </div>
+            <p className="text-[11px] text-gray-500">
+              El local y el laboratorio salen de tu usuario. Si no tienes cuenta, pídela al administrador.
+            </p>
 
             <button
               type="submit"

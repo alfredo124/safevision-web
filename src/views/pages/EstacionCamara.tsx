@@ -45,7 +45,8 @@ const ESTADOS: Record<EstadoEstacion, { texto: string; color: string }> = {
 
 /**
  * Estación de cámara (Tarea 0C): el celular o la laptop usa su cámara, la muestra a 30 FPS
- * localmente y envía solo 2-5 imágenes por segundo al servidor para el análisis.
+ * localmente y envía 5-15 imágenes por segundo al servidor. Ese ritmo es la fluidez del video en
+ * Monitoreo; el análisis toma solo las que alcanza a procesar.
  * La transmisión vive en services/stationStream: sigue aunque se cambie de página.
  */
 export function EstacionCamaraPage() {
@@ -162,9 +163,10 @@ export function EstacionCamaraPage() {
   const info = ESTADOS[estacion.estado];
 
   return (
-    <div className="flex h-full flex-1 flex-col gap-3 overflow-y-auto p-2 text-white md:gap-4 md:p-4 lg:flex-row">
-      <section className="flex-1 space-y-2">
-        <div className="relative aspect-[4/3] max-h-[60dvh] w-full overflow-hidden rounded-lg border border-gray-800 bg-black lg:max-h-none">
+    // Celular en horizontal (short): vista previa y controles lado a lado, como en PC.
+    <div className="flex h-full flex-1 flex-col gap-3 overflow-y-auto p-2 text-white md:gap-4 md:p-4 lg:flex-row short:flex-row short:p-2">
+      <section className="flex-1 space-y-2 short:min-w-0">
+        <div className="relative aspect-[4/3] max-h-[60dvh] w-full overflow-hidden rounded-lg border border-gray-800 bg-black lg:max-h-none short:max-h-[calc(100dvh-7rem)]">
           {/* Vista local a la velocidad de la cámara: no pasa por el servidor. */}
           <video ref={videoRef} muted playsInline className="h-full w-full object-contain" />
           <OverlayCanvas message={overlay} equipment={equipment} />
@@ -178,7 +180,7 @@ export function EstacionCamaraPage() {
         <p className={`text-sm font-semibold ${info.color}`} role="status">{info.texto}</p>
         {transmitiendo && (
           <p className="text-[11px] text-gray-400">
-            {estacion.enviados} imágenes enviadas · {estacion.fps} por segundo para el análisis
+            {estacion.enviados} imágenes enviadas · {estacion.fps} por segundo
             {overlay?.monitoring ? ' · práctica en curso: se dibujan los recuadros del motor' : ' · sin práctica iniciada: no se analiza'}
           </p>
         )}
@@ -200,7 +202,7 @@ export function EstacionCamaraPage() {
         )}
       </section>
 
-      <aside className="w-full space-y-4 lg:w-80">
+      <aside className="w-full space-y-4 lg:w-80 short:w-72 short:shrink-0">
         <div className="space-y-3 rounded-lg border border-gray-800 bg-[#16181e] p-3 md:p-4">
           <h1 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider">
             <Camera className="h-4 w-4 text-emerald-400" /> Estación de cámara
@@ -257,10 +259,11 @@ export function EstacionCamaraPage() {
           </div>
 
           <label className="block space-y-1 text-xs text-gray-300">
-            <span>Imágenes por segundo para el análisis</span>
+            <span>Fluidez del video en Monitoreo (imágenes por segundo)</span>
             <select value={estacion.fps} onChange={event => setEstacionFps(Number(event.target.value))} className="w-full rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-sm">
-              {[2, 3, 5].map(value => <option key={value} value={value}>{value}</option>)}
+              {[5, 10, 15].map(value => <option key={value} value={value}>{value}{value === 10 ? ' (recomendado)' : ''}</option>)}
             </select>
+            <span className="block text-[11px] text-gray-500">Más imágenes = video más fluido para quien vigila, pero más uso de red. El análisis no cambia.</span>
           </label>
 
           {transmitiendo ? (

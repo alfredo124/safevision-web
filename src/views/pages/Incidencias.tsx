@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 import { reglasLabService, type Incident, type IncidentStatus, type ReviewAction } from '../../services/reglasLabService';
 import { CapturaModal } from '../components/CapturaModal';
+import { severityStyle } from '../../services/severity';
+import { claseModelo } from '../../services/etiquetas';
 
 const ACTION_LABELS: Record<ReviewAction, string> = {
   CORREGIDO: 'Corregido',
@@ -146,12 +148,14 @@ export function IncidenciasPage() {
     counts[incident.tipo] = (counts[incident.tipo] || 0) + 1;
     return counts;
   }, {})).sort((left, right) => right[1] - left[1]).slice(0, 6);
-  const review = async (incidentId: number, payload: { decision: 'CONFIRMADA'; action: ReviewAction } | { decision: 'DESCARTADA' }) => {
+  const review = async (incidentId: number, payload: { decision: 'CONFIRMADA'; action: ReviewAction } | { decision: 'DESCARTADA'; reason?: string }) => {
     try {
       const updated = await reglasLabService.reviewIncident(incidentId, payload);
       setHistorial(current => current.map(item => item.id === incidentId ? mapIncident(updated) : item));
+      return true;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'No se pudo guardar la validación.');
+      return false;
     }
   };
 
@@ -344,7 +348,7 @@ export function IncidenciasPage() {
                     </p>
                   </td>
                   <td className="p-3 text-[10px] text-gray-400">
-                    <span>{row.detectedClass ?? 'Sin clase YOLO'}</span>
+                    <span>{row.detectedClass ? claseModelo(row.detectedClass) : 'Sin clase del modelo'}</span>
                     {row.confidence !== null && <span className="ml-1">{Math.round(row.confidence * 100)}%</span>}
                     {row.faltas.some(fault => fault.has_capture) && (
                       <button onClick={() => setCaptura(row.raw)} className="ml-1 inline-flex items-center gap-1 rounded border border-emerald-700 px-1.5 py-0.5 text-emerald-300 hover:bg-emerald-900/40">
@@ -353,13 +357,7 @@ export function IncidenciasPage() {
                     )}
                   </td>
                   <td className="p-3">
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${
-                      row.gravedad === 'CRÍTICO'
-                        ? 'bg-red-500/20 text-red-400 border-red-500/30'
-                        : row.gravedad === 'ALTO'
-                        ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
-                        : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
-                    }`}>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${severityStyle(row.gravedad).badge}`}>
                       {row.gravedad}
                     </span>
                   </td>
@@ -389,7 +387,7 @@ export function IncidenciasPage() {
         </div>
       </div>
 
-      {captura && <CapturaModal incident={captura} onClose={() => setCaptura(null)} />}
+      {captura && <CapturaModal incident={captura} onClose={() => setCaptura(null)} onReview={(incident, validacion) => review(incident.id, validacion)} />}
 
     </div>
   );

@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import { authService } from '../../services/authService';
 import { PracticaControl } from '../components/PracticaControl';
+import { estadoCamara } from '../../services/etiquetas';
+import { usuariosService, type Local } from '../../services/usuariosService';
 import { reglasLabService, type CameraSummary, type LaboratoryType, type RulesConfiguration, type SafetyEquipment, type Workshop } from '../../services/reglasLabService';
 
 interface EPPItem {
@@ -62,6 +64,9 @@ export function ConfigReglasPage() {
   const [showAddWorkshopModal, setShowAddWorkshopModal] = useState(false);
   const [newWorkshopName, setNewWorkshopName] = useState('');
   const [newWorkshopArea, setNewWorkshopArea] = useState<LaboratoryType>('QUIMICA');
+  // Local del laboratorio nuevo (solo el administrador crea laboratorios).
+  const [newWorkshopCampus, setNewWorkshopCampus] = useState<number | ''>('');
+  const [locales, setLocales] = useState<Local[]>([]);
 
   // Formulario de Nueva Regla
   const [nuevaRegla, setNuevaRegla] = useState({
@@ -75,6 +80,13 @@ export function ConfigReglasPage() {
   const activeAmbiente = ambientes.find((a) => a.id === selectedAmbienteId) ?? ambientes[0];
   const currentUser = authService.getCurrentUser();
   const canCreateWorkshops = currentUser?.role === 'ADMINISTRADOR';
+
+  useEffect(() => {
+    if (!canCreateWorkshops) return;
+    usuariosService.listarLocales()
+      .then(lista => setLocales(lista.filter(local => local.is_active)))
+      .catch(() => { /* sin locales: el laboratorio se crea sin local y se asigna después */ });
+  }, [canCreateWorkshops]);
   const camarasSinAsignar = activeAmbiente
     ? availableCameras.filter(camera => camera.laboratory_type === activeAmbiente.laboratoryType)
     : [];
@@ -159,7 +171,9 @@ export function ConfigReglasPage() {
     event.preventDefault();
     setError('');
     try {
-      const workshop = await reglasLabService.createWorkshop({ name: newWorkshopName.trim(), laboratory_type: newWorkshopArea });
+      const workshop = await reglasLabService.createWorkshop({
+        name: newWorkshopName.trim(), laboratory_type: newWorkshopArea, campus_id: newWorkshopCampus === '' ? null : newWorkshopCampus,
+      });
       await loadConfiguration();
       setSelectedAmbienteId(workshop.id);
       setNewWorkshopName('');
@@ -228,8 +242,12 @@ export function ConfigReglasPage() {
     return (
       <main className="flex flex-1 flex-col items-center justify-center gap-4 bg-[#0d0e12] p-6 text-white">
         <Shield className="h-8 w-8 text-emerald-400" />
-        <h1 className="text-lg font-bold">No hay talleres configurados</h1>
-        <p className="text-sm text-gray-400">Crea un taller para asignar cámaras reales y definir el EPP obligatorio.</p>
+        <h1 className="text-lg font-bold">{canCreateWorkshops ? 'No hay talleres configurados' : 'No tienes un laboratorio asignado'}</h1>
+        <p className="text-sm text-gray-400">
+          {canCreateWorkshops
+            ? 'Crea un taller para asignar cámaras reales y definir el EPP obligatorio.'
+            : 'Pide al administrador general que te asigne tu laboratorio y vuelve a iniciar sesión.'}
+        </p>
         {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
         {canCreateWorkshops && (
           <form onSubmit={handleCreateWorkshop} className="flex flex-wrap items-center justify-center gap-2">
@@ -237,6 +255,10 @@ export function ConfigReglasPage() {
             <select value={newWorkshopArea} onChange={event => setNewWorkshopArea(event.target.value as LaboratoryType)} className="rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm">
               <option value="QUIMICA">Química</option>
               <option value="FISICA">Física</option>
+            </select>
+            <select value={newWorkshopCampus} onChange={event => setNewWorkshopCampus(event.target.value ? Number(event.target.value) : '')} aria-label="Local" className="rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm">
+              <option value="">Sin local</option>
+              {locales.map(local => <option key={local.id} value={local.id}>{local.name}</option>)}
             </select>
             <button disabled={isSaving} className="rounded bg-emerald-600 px-3 py-2 text-sm font-semibold disabled:opacity-50">Crear taller</button>
           </form>
@@ -388,7 +410,7 @@ export function ConfigReglasPage() {
                       <td className="p-2 font-semibold text-gray-200">{cam.name}</td>
                       <td className="p-2">
                         <span className={`rounded border px-2 py-0.5 text-[9px] font-bold ${cam.status === 'online' ? 'border-emerald-500/30 bg-emerald-950/80 text-emerald-400' : 'border-gray-700 bg-gray-900 text-gray-400'}`}>
-                          {cam.status.toUpperCase()}
+                          {estadoCamara(cam.status).toUpperCase()}
                         </span>
                       </td>
                       <td className="p-2 text-right">
@@ -604,6 +626,13 @@ export function ConfigReglasPage() {
               <select value={newWorkshopArea} onChange={event => setNewWorkshopArea(event.target.value as LaboratoryType)} className="w-full rounded border border-gray-700 bg-gray-900 p-2 text-white">
                 <option value="QUIMICA">Química</option>
                 <option value="FISICA">Física</option>
+              </select>
+            </label>
+            <label className="block space-y-1 text-xs text-gray-400">
+              <span>Local</span>
+              <select value={newWorkshopCampus} onChange={event => setNewWorkshopCampus(event.target.value ? Number(event.target.value) : '')} className="w-full rounded border border-gray-700 bg-gray-900 p-2 text-white">
+                <option value="">Sin local (asignar después)</option>
+                {locales.map(local => <option key={local.id} value={local.id}>{local.name}</option>)}
               </select>
             </label>
             {error && <p role="alert" className="text-sm text-red-300">{error}</p>}

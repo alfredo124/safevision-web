@@ -9,6 +9,8 @@ export interface OverlayRuleRef {
   equipment_id: string;
   rule_code: string | null;
   severity?: string;
+  /** BATA_ABIERTA: el EPP está, pero mal puesto (falta leve). */
+  detail?: string | null;
 }
 
 export interface OverlayPerson {

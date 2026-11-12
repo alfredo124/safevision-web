@@ -85,7 +85,7 @@ export function ReportesPage() {
             />
           </div>
 
-          {/* Sede / Campus */}
+          {/* Sede */}
           <div className="space-y-1">
             <label className="text-xs text-gray-400">Campus / Sede:</label>
             <input 
@@ -161,7 +161,7 @@ export function ReportesPage() {
         </div>
       </div>
 
-      {/* Modal / PDF Preview Viewer */}
+      {/* Ventana con la vista previa del PDF */}
       <ReportePDFModal 
         isOpen={showPreviewModal}
         onClose={() => setShowPreviewModal(false)}

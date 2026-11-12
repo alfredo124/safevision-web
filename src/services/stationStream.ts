@@ -36,7 +36,9 @@ export const ACTIVE_STATES: EstadoEstacion[] = ['conectando', 'transmitiendo', '
 
 let snapshot: EstacionSnapshot = {
   estado: window.isSecureContext ? 'detenida' : 'inseguro',
-  cameraId: null, cameraName: null, fps: 3, enviados: 0, media: null,
+  // Imágenes por segundo enviadas: es la fluidez del video en Monitoreo. El análisis va a su propio
+  // ritmo (límite del servidor) y siempre toma la última imagen, así que enviar más no lo recarga.
+  cameraId: null, cameraName: null, fps: 10, enviados: 0, media: null,
   facing: null, deviceId: null, deviceLabel: null, cambiando: false,
 };
 const listeners = new Set<() => void>();

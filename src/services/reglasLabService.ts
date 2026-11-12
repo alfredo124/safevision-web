@@ -34,6 +34,8 @@ export interface Workshop {
   name: string;
   laboratory_type: LaboratoryType;
   description: string | null;
+  campus_id?: number | null;
+  campus_name?: string | null;
   cameras: CameraSummary[];
   required_equipment_ids: string[];
   created_at: string;
@@ -54,6 +56,8 @@ export interface IncidentFault {
   severity: Severity;
   has_capture: boolean;
   detected_at: string;
+  /** BATA_ABIERTA: el EPP está, pero mal puesto (falta leve). */
+  detail?: string | null;
 }
 
 export interface Incident {
@@ -146,7 +150,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const reglasLabService = {
   getConfiguration: () => request<RulesConfiguration>('/configuration'),
-  createWorkshop: (payload: { name: string; laboratory_type: LaboratoryType; description?: string }) =>
+  createWorkshop: (payload: { name: string; laboratory_type: LaboratoryType; description?: string; campus_id?: number | null }) =>
     request<Workshop>('/workshops', { method: 'POST', body: JSON.stringify(payload) }),
   saveWorkshopConfiguration: (workshopId: number, payload: { camera_ids: number[]; required_equipment_ids: string[] }) =>
     request<Workshop>(`/workshops/${workshopId}/configuration`, { method: 'PUT', body: JSON.stringify(payload) }),

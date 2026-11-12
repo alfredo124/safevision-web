@@ -3,11 +3,12 @@ import { API_BASE } from '../../services/apiConfig';
 import { authService } from '../../services/authService';
 
 /**
- * Miniatura que pide una imagen suelta cada `intervalMs` (1 por segundo por defecto).
+ * Miniatura que pide imágenes sueltas seguidas (~6 por segundo): se ve como video fluido.
+ * Cada petición sale cuando termina la anterior; con la pestaña oculta baja a 1 por segundo.
  * No deja una conexión abierta como el video MJPEG, así varias pestañas y cámaras no agotan
  * el límite de conexiones del navegador. El token va en la cabecera, no en la URL.
  */
-export function SnapshotImage({ cameraId, sync, alt, className, intervalMs = 1000, ref }: {
+export function SnapshotImage({ cameraId, sync, alt, className, intervalMs = 150, ref }: {
   cameraId: number;
   sync: boolean;
   alt: string;
@@ -42,7 +43,7 @@ export function SnapshotImage({ cameraId, sync, alt, className, intervalMs = 100
         /* sin conexión: se reintenta en el siguiente ciclo */
       } finally {
         // La siguiente petición sale cuando termina la anterior: nunca se acumulan.
-        if (active) timer = window.setTimeout(() => void load(), intervalMs);
+        if (active) timer = window.setTimeout(() => void load(), document.hidden ? 1000 : intervalMs);
       }
     };
     void load();

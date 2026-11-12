@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { EquipmentInfo, OverlayMessage } from '../../hooks/useCameraOverlay';
+import { SEVERITY_HEX, tagTextColor } from '../../services/severity';
 
 /** Dibuja los recuadros del motor sobre un video mostrado con object-contain. */
 export function OverlayCanvas({ message, equipment }: { message: OverlayMessage | null; equipment: EquipmentInfo }) {
@@ -54,20 +55,22 @@ export function OverlayCanvas({ message, equipment }: { message: OverlayMessage 
       const title = person.state === 'EN_RIESGO'
         ? `P${person.track_id} · ${person.label} ${Math.round(person.progress * 100)}%`
         : `P${person.track_id} · ${person.label}`;
-      drawTag(context, title, x, Math.max(0, y - fontSize - 6), person.color, fontSize,
-        person.state === 'PARCIAL' || person.state === 'EN_RIESGO' ? '#111827' : '#ffffff');
+      drawTag(context, title, x, Math.max(0, y - fontSize - 6), person.color, fontSize, tagTextColor(person.color));
 
       // Esquina superior derecha: icono y código de cada EPP faltante o en verificación.
       const tags = [
-        ...person.missing.map(item => ({ item, color: person.color })),
-        ...person.at_risk.map(item => ({ item, color: '#f59e0b' })),
+        // Cada falta con el color de su gravedad (una persona puede tener una grave y una leve).
+        ...person.missing.map(item => ({ item, color: SEVERITY_HEX[item.severity ?? ''] ?? person.color })),
+        ...person.at_risk.map(item => ({ item, color: '#38bdf8' })),
       ];
       let tagY = y + 2;
       for (const { item, color } of tags) {
         const info = equipment[item.equipment_id];
-        const text = `${info?.icon ?? '⚠'} ${item.rule_code ?? item.equipment_id}`;
+        // EPP mal puesto (falta leve): sufijo corto en la etiqueta del recuadro.
+        const detail = item.detail === 'BATA_ABIERTA' ? ' abierta' : item.detail === 'LENTES_MAL_PUESTOS' ? ' fuera' : '';
+        const text = `${info?.icon ?? '⚠'} ${item.rule_code ?? item.equipment_id}${detail}`;
         const tagWidth = context.measureText(text).width + 8;
-        drawTag(context, text, Math.max(x, x + width - tagWidth - 2), tagY, color, fontSize);
+        drawTag(context, text, Math.max(x, x + width - tagWidth - 2), tagY, color, fontSize, tagTextColor(color));
         tagY += fontSize + 6;
       }
     }

@@ -4,7 +4,9 @@ import { AlertTriangle, BellRing, CheckCircle2, ChevronDown, ChevronUp, Image as
 import { authService } from '../../services/authService';
 import { reglasLabService, type Incident, type ReviewAction } from '../../services/reglasLabService';
 import { CapturaModal } from './CapturaModal';
-import { useIsMobile } from '../../hooks/useIsMobile';
+import { maxSeverity, severityStyle } from '../../services/severity';
+import { textoFalta } from '../../services/etiquetas';
+import { isCompactScreen, useIsMobile } from '../../hooks/useIsMobile';
 
 const POLL_MS = 3000;
 
@@ -34,9 +36,9 @@ function beep(frequency = 880) {
 export function AlertasPanel() {
   const [pending, setPending] = useState<Incident[]>([]);
   const mobile = useIsMobile();
-  // En el celular empieza plegado para no tapar las cámaras. Nunca se abre solo: una alerta nueva
+  // En el celular (vertical u horizontal) empieza plegado para no tapar las cámaras. Nunca se abre solo: una alerta nueva
   // suena y se marca como "nueva" hasta que el encargado abre el panel.
-  const [open, setOpen] = useState(() => !window.matchMedia('(max-width: 767px)').matches);
+  const [open, setOpen] = useState(() => !isCompactScreen());
   const [unseen, setUnseen] = useState(0);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [discarding, setDiscarding] = useState<{ id: number; reason: string } | null>(null);
@@ -87,33 +89,37 @@ export function AlertasPanel() {
       await reglasLabService.reviewIncident(incident.id, payload);
       setPending(current => current.filter(item => item.id !== incident.id));
       setDiscarding(null);
+      return true;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'No se pudo guardar la validación.');
+      return false;
     } finally {
       setBusyId(null);
     }
   };
 
   if (pending.length === 0 && !error) return null;
+  // El encabezado toma el color de la alerta más grave pendiente.
+  const header = severityStyle(maxSeverity(pending.map(item => item.severity)));
 
   return (
     <>
-      <div className="relative z-30 w-full shrink-0 border-b border-red-500/60 bg-[#16181e] md:fixed md:bottom-4 md:right-4 md:z-50 md:w-96 md:max-w-[calc(100vw-2rem)] md:rounded-lg md:border md:shadow-2xl md:shadow-black/60">
+      <div className="relative z-30 w-full shrink-0 border-b border-gray-700 bg-[#16181e] md:fixed md:bottom-4 md:right-4 md:z-50 md:w-96 md:max-w-[calc(100vw-2rem)] md:rounded-lg md:border md:shadow-2xl md:shadow-black/60">
         <button
           onClick={() => { setOpen(value => !value); setUnseen(0); }}
           aria-expanded={open}
-          className="flex w-full items-center justify-between gap-2 bg-red-950/60 px-3 py-2 text-left md:rounded-t-lg"
+          className="flex w-full items-center justify-between gap-2 bg-gray-900 px-3 py-2 text-left md:rounded-t-lg"
         >
-          <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-red-300">
+          <span className={`flex items-center gap-2 text-xs font-bold uppercase tracking-wider ${header.text}`}>
             <BellRing className="h-4 w-4 animate-pulse" />
             Alertas por validar ({pending.length})
             {unseen > 0 && !open && (
-              <span className="animate-pulse rounded bg-red-500 px-1.5 text-[10px] font-bold text-white">
+              <span className="animate-pulse rounded bg-sky-500 px-1.5 text-[10px] font-bold text-white">
                 {unseen} nueva{unseen === 1 ? '' : 's'}
               </span>
             )}
             {pending.some(item => item.escalated) && (
-              <span className="rounded bg-amber-500 px-1.5 text-[10px] font-bold text-black">
+              <span className="rounded bg-fuchsia-500 px-1.5 text-[10px] font-bold text-white">
                 {pending.filter(item => item.escalated).length} sin respuesta
               </span>
             )}
@@ -126,26 +132,26 @@ export function AlertasPanel() {
         </button>
 
         {open && (
-          <div className="max-h-[45dvh] space-y-2 overflow-y-auto p-2 md:max-h-[60vh]">
+          <div className="max-h-[45dvh] space-y-2 overflow-y-auto p-2 md:max-h-[60vh] short:md:max-h-[55dvh]">
             {error && <p role="alert" className="px-1 text-[11px] text-amber-400">{error}</p>}
-            {pending.map(incident => (
-              <div key={incident.id} className={`space-y-1.5 rounded border-l-4 p-2 text-xs ${incident.escalated ? 'border-amber-400 bg-amber-950/30' : 'border-red-500 bg-red-950/20'}`}>
+            {pending.map(incident => { const style = severityStyle(incident.severity); return (
+              <div key={incident.id} className={`space-y-1.5 rounded border-l-4 p-2 text-xs ${style.card} ${incident.escalated ? 'ring-1 ring-fuchsia-400/70' : ''}`}>
                 {incident.escalated && (
-                  <p className="text-[10px] font-bold text-amber-300">
+                  <p className="text-[10px] font-bold text-fuchsia-300">
                     Sin respuesta hace {Math.floor((incident.pending_seconds ?? 0) / 60)} min{isAdmin ? ' · aviso al administrador' : ' · se avisó al administrador'}
                   </p>
                 )}
                 <div className="flex items-start justify-between gap-2">
-                  <p className="flex items-center gap-1 font-bold text-red-300">
+                  <p className={`flex items-center gap-1 font-bold ${style.text}`}>
                     <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
                     {incident.title}
                   </p>
-                  <span className="shrink-0 rounded border border-red-500/30 bg-red-500/20 px-1.5 text-[10px] font-bold text-red-300">{incident.severity}</span>
+                  <span className={`shrink-0 rounded border px-1.5 text-[10px] font-bold ${style.badge}`}>{style.label}</span>
                 </div>
                 <div className="flex flex-wrap gap-1">
                   {incident.faults.map((fault, index) => (
-                    <span key={fault.id ?? index} className="rounded border border-red-500/40 bg-red-500/10 px-1.5 py-0.5 text-[10px] text-red-200">
-                      Falta {fault.equipment_name ?? fault.equipment_id}{fault.rule_code ? ` · ${fault.rule_code}` : ''}
+                    <span key={fault.id ?? index} className={`rounded border px-1.5 py-0.5 text-[10px] ${severityStyle(fault.severity).chip}`}>
+                      {textoFalta(fault.equipment_name ?? fault.equipment_id ?? 'EPP', fault.detail)}{fault.rule_code ? ` · ${fault.rule_code}` : ''}
                     </span>
                   ))}
                 </div>
@@ -196,11 +202,12 @@ export function AlertasPanel() {
                   </div>
                 )}
               </div>
-            ))}
+            );})}
           </div>
         )}
       </div>
-      {captura && <CapturaModal incident={captura} onClose={() => setCaptura(null)} />}
+      {/* La ventana queda fija en la alerta que se abrió y permite validarla ahí mismo. */}
+      {captura && <CapturaModal incident={captura} onClose={() => setCaptura(null)} onReview={review} />}
     </>
   );
 }

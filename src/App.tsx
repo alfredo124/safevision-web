@@ -9,6 +9,8 @@ import { ConfigReglasPage } from './views/pages/ConfigReglas';
 import { IncidenciasPage } from './views/pages/Incidencias';
 import { ReportesPage } from './views/pages/Reportes';
 import { EstacionCamaraPage } from './views/pages/EstacionCamara';
+import { UsuariosPage } from './views/pages/Usuarios';
+import { ConfiguracionInicialPage } from './views/pages/ConfiguracionInicial';
 import { authService } from './services/authService';
 
 function ProtectedRoutes() {
@@ -19,11 +21,18 @@ function ProtectedRoutes() {
   return <Outlet />;
 }
 
+/** Solo el administrador general: los demás vuelven a Monitoreo. */
+function AdminRoutes() {
+  return authService.getCurrentUser()?.role === 'ADMINISTRADOR' ? <Outlet /> : <Navigate to="/" replace />;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        {/* Solo la primera vez (sin administrador); si ya existe, la página manda al login. */}
+        <Route path="/configuracion-inicial" element={<ConfiguracionInicialPage />} />
 
         <Route element={<ProtectedRoutes />}>
           <Route path="/" element={<MainLayout />}>
@@ -32,6 +41,9 @@ export default function App() {
             <Route path="incidencias" element={<IncidenciasPage />} />
             <Route path="reportes" element={<ReportesPage />} />
             <Route path="estacion" element={<EstacionCamaraPage />} />
+            <Route element={<AdminRoutes />}>
+              <Route path="usuarios" element={<UsuariosPage />} />
+            </Route>
           </Route>
         </Route>
 

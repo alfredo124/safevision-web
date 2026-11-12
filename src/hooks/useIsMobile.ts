@@ -14,3 +14,11 @@ export function useIsMobile(): boolean {
   }, []);
   return mobile;
 }
+
+/** Pantalla baja (celular en horizontal): mismo corte que la variante `short:` de index.css. */
+export const SHORT_QUERY = '(max-height: 500px)';
+
+/** true si conviene empezar con los paneles plegados: celular en vertical u horizontal. */
+export function isCompactScreen(): boolean {
+  return window.matchMedia(`${QUERY}, ${SHORT_QUERY}`).matches;
+}
