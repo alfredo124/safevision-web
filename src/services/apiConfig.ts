@@ -8,6 +8,11 @@
  */
 const configured = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
 
-export const API_BASE = (configured || `${window.location.protocol}//${window.location.hostname}:8000`).replace(/\/+$/, '');
+// "localhost" en Windows prueba primero IPv6 (::1); el backend escucha en IPv4 (0.0.0.0) y cada conexión
+// nueva esperaba ~2 s antes de reintentar (medido el 2026-11-12: 2044 ms frente a 14 ms con 127.0.0.1).
+// Es el mismo equipo, así que se usa 127.0.0.1 directamente. El certificado HTTPS local lo incluye.
+const host = window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname;
+
+export const API_BASE = (configured || `${window.location.protocol}//${host}:8000`).replace(/\/+$/, '');
 
 export const WS_BASE = API_BASE.replace(/^http/i, 'ws');

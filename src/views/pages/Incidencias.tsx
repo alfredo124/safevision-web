@@ -14,19 +14,10 @@ import {
 import { reglasLabService, type Incident, type IncidentStatus, type ReviewAction } from '../../services/reglasLabService';
 import { CapturaModal } from '../components/CapturaModal';
 import { severityStyle } from '../../services/severity';
-import { claseModelo } from '../../services/etiquetas';
+import { ACCION_REVISION, ESTADO_INCIDENCIA, claseModelo } from '../../services/etiquetas';
 
-const ACTION_LABELS: Record<ReviewAction, string> = {
-  CORREGIDO: 'Corregido',
-  RETIRADO_DE_PRACTICA: 'Retirado de la práctica',
-};
-const STATUS_LABELS: Record<IncidentStatus, string> = {
-  PENDIENTE: 'Pendiente de validar',
-  EN_REVISION: 'En revisión',
-  CONFIRMADA: 'Confirmada',
-  DESCARTADA: 'Descartada',
-  ATENDIDO: 'Atendido',
-};
+const ACTION_LABELS: Record<ReviewAction, string> = ACCION_REVISION;
+const STATUS_LABELS: Record<IncidentStatus, string> = ESTADO_INCIDENCIA as Record<IncidentStatus, string>;
 
 interface IncidenteHistorico {
   id: number;
@@ -53,6 +44,8 @@ interface IncidenteHistorico {
   motivo: string | null;
   accion: ReviewAction | null;
   faltas: Incident['faults'];
+  /** Código de la práctica en la que ocurrió (null: anterior a las sesiones o fuera de una práctica). */
+  sesion: string | null;
   raw: Incident;
 }
 
@@ -89,6 +82,7 @@ const mapIncident = (incident: Incident): IncidenteHistorico => {
     motivo: incident.review_reason,
     accion: incident.action_taken,
     faltas: incident.faults,
+    sesion: incident.session_code ?? null,
     raw: incident,
   };
 };
@@ -98,6 +92,7 @@ export function IncidenciasPage() {
   const [fechaInicio, setFechaInicio] = useState(today);
   const [fechaFin, setFechaFin] = useState(today);
   const [ambienteFiltro, setAmbienteFiltro] = useState('TODOS');
+  const [sesionFiltro, setSesionFiltro] = useState('TODAS');
   const [historial, setHistorial] = useState<IncidenteHistorico[]>([]);
   const [ambientes, setAmbientes] = useState<{ id: number; name: string }[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -130,8 +125,16 @@ export function IncidenciasPage() {
     return () => { active = false; window.clearInterval(timer); };
   }, []);
 
+  // Sesiones presentes en el historial (las más recientes primero), para elegir una práctica concreta.
+  const sesiones = [...new Map(historial.filter(item => item.sesion)
+    .map(item => [item.sesion as string, { codigo: item.sesion as string, ambiente: item.ambiente, fecha: item.fecha }])).values()]
+    .filter(sesion => ambienteFiltro === 'TODOS' || sesion.ambiente === ambienteFiltro)
+    .sort((a, b) => b.codigo.localeCompare(a.codigo));
+
   const datosFiltrados = historial.filter((item) => {
     const cumpleAmbiente = ambienteFiltro === 'TODOS' || item.ambiente === ambienteFiltro;
+    // Con una sesión elegida se muestra la práctica completa, sin importar las fechas.
+    if (sesionFiltro !== 'TODAS') return cumpleAmbiente && item.sesion === sesionFiltro;
     const cumpleFecha = item.fecha >= fechaInicio && item.fecha <= fechaFin;
     return cumpleAmbiente && cumpleFecha;
   });
@@ -161,8 +164,8 @@ export function IncidenciasPage() {
 
   const exportReport = () => {
     const rows = [
-      ['Código', 'Fecha', 'Hora', 'Taller', 'Cámara', 'Incidencia', 'Regla', 'Gravedad', 'Estado', 'Validado por', 'Fecha validación', 'Acción', 'Motivo descarte'],
-      ...datosFiltrados.map(row => [row.codigo, row.fecha, row.hora, row.ambiente, row.camara, row.tipo, row.faltas.map(fault => fault.rule_code).filter(Boolean).join(' '), row.gravedad, STATUS_LABELS[row.estado], row.revisor ?? '', row.revisadoEn ?? '', row.accion ? ACTION_LABELS[row.accion] : '', row.motivo ?? '']),
+      ['Código', 'Sesión', 'Fecha', 'Hora', 'Taller', 'Cámara', 'Incidencia', 'Regla', 'Gravedad', 'Estado', 'Validado por', 'Fecha validación', 'Acción', 'Motivo descarte'],
+      ...datosFiltrados.map(row => [row.codigo, row.sesion ?? '', row.fecha, row.hora, row.ambiente, row.camara, row.tipo, row.faltas.map(fault => fault.rule_code).filter(Boolean).join(' '), row.gravedad, STATUS_LABELS[row.estado], row.revisor ?? '', row.revisadoEn ?? '', row.accion ? ACTION_LABELS[row.accion] : '', row.motivo ?? '']),
     ];
     const csv = rows.map(row => row.map(value => `"${value.replaceAll('"', '""')}"`).join(',')).join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
@@ -209,11 +212,22 @@ export function IncidenciasPage() {
             <Filter className="w-4 h-4 text-indigo-400" />
             <select
               value={ambienteFiltro}
-              onChange={(e) => setAmbienteFiltro(e.target.value)}
+              onChange={(e) => { setAmbienteFiltro(e.target.value); setSesionFiltro('TODAS'); }}
               className="bg-gray-900 border border-gray-700 text-gray-200 px-2 py-1 rounded focus:outline-none"
             >
               <option value="TODOS">Todos los Ambientes</option>
               {ambientes.map(workshop => <option key={workshop.id} value={workshop.name}>{workshop.name}</option>)}
+            </select>
+            <select
+              value={sesionFiltro}
+              onChange={(e) => setSesionFiltro(e.target.value)}
+              aria-label="Sesión de práctica"
+              className="bg-gray-900 border border-gray-700 text-gray-200 px-2 py-1 rounded focus:outline-none"
+            >
+              <option value="TODAS">Todas las prácticas</option>
+              {sesiones.map(sesion => (
+                <option key={sesion.codigo} value={sesion.codigo}>{sesion.codigo} · {sesion.ambiente}</option>
+              ))}
             </select>
           </div>
 
@@ -332,7 +346,16 @@ export function IncidenciasPage() {
             <tbody className="divide-y divide-gray-800/60">
               {datosFiltrados.map((row) => (
                 <tr key={row.id} className="hover:bg-gray-800/30 transition-colors">
-                  <td className="p-3 font-mono text-indigo-400 font-semibold">{row.codigo}</td>
+                  <td className="p-3 font-mono text-indigo-400 font-semibold">
+                    {row.codigo}
+                    {row.sesion && (
+                      <button type="button" onClick={() => setSesionFiltro(row.sesion as string)}
+                        title="Ver todas las alertas de esta práctica"
+                        className="block text-[10px] font-normal text-gray-500 hover:text-gray-300 hover:underline">
+                        {row.sesion}
+                      </button>
+                    )}
+                  </td>
                   <td className="p-3 text-gray-300">{row.fecha} <span className="text-gray-500">({row.hora})</span></td>
                   <td className="p-3">
                     <p className="font-semibold text-gray-200">{row.ambiente}</p>

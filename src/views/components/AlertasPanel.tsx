@@ -50,11 +50,12 @@ export function AlertasPanel() {
 
   const pollRef = useRef<() => void>(() => undefined);
   // Una alerta nueva o validada en otro equipo se ve al instante (la consulta cada 3 s queda de respaldo).
-  useServerChanges(['incidents'], () => pollRef.current());
+  // También al iniciar o terminar una práctica: el panel solo muestra las alertas de prácticas en curso.
+  useServerChanges(['incidents', 'practica'], () => pollRef.current());
 
   useEffect(() => {
     let active = true;
-    const poll = () => reglasLabService.getIncidents({ status: 'PENDIENTE' })
+    const poll = () => reglasLabService.getIncidents({ status: 'PENDIENTE', active_session: true })
       .then(items => {
         if (!active) return;
         const ids = new Set(items.map(item => item.id));

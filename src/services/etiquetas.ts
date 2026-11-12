@@ -37,3 +37,18 @@ export const detalleFalta = (detalle: string) => DETALLE_FALTA[detalle] ?? detal
 /** Texto corto para una falta: "Falta X" o "X: bata abierta". */
 export const textoFalta = (equipo: string, detalle?: string | null) =>
   detalle ? `${equipo}: ${detalleFalta(detalle)}` : `Falta ${equipo}`;
+
+/** Estado de una incidencia y acción tomada al confirmarla (Incidencias y Reportes). */
+export const ESTADO_INCIDENCIA: Record<string, string> = {
+  PENDIENTE: 'Pendiente de validar',
+  EN_REVISION: 'En revisión',
+  CONFIRMADA: 'Confirmada',
+  DESCARTADA: 'Descartada',
+  ATENDIDO: 'Atendido',
+};
+export const ACCION_REVISION: Record<string, string> = {
+  CORREGIDO: 'Corregido',
+  RETIRADO_DE_PRACTICA: 'Retirado de la práctica',
+};
+export const estadoIncidencia = (estado: string) => ESTADO_INCIDENCIA[estado] ?? estado;
+export const accionRevision = (accion: string) => ACCION_REVISION[accion] ?? accion;

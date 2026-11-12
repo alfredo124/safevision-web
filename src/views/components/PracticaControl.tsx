@@ -1,7 +1,8 @@
 import { useServerChanges } from '../../services/changeEvents';
 import { useCallback, useEffect, useState } from 'react';
 import { Play, Square, Activity } from 'lucide-react';
-import { reglasLabService, type CameraMonitoringStatus } from '../../services/reglasLabService';
+import { reglasLabService, type CameraMonitoringStatus, type PracticeSession } from '../../services/reglasLabService';
+import { duracion } from '../../services/formatoReporte';
 import { authService } from '../../services/authService';
 import { API_BASE } from '../../services/apiConfig';
 
@@ -12,32 +13,31 @@ interface Rendimiento {
   hint: string | null;
   max_fps: number;
   manual: boolean;
+  physical_cores?: number | null;
+  /** Cámaras que analizan a la vez en este equipo (las demás esperan su turno). */
+  analysis_slots?: number;
+  /** Cómo se decidió: regla por núcleos, medido en este equipo o fijado a mano. */
+  slots_source?: 'regla' | 'medido' | 'manual' | null;
 }
+
+const ORIGEN_SIMULTANEOS: Record<string, string> = { regla: 'según sus núcleos', medido: 'medido en este equipo', manual: 'fijado a mano' };
 
 /** Inicia o finaliza el monitoreo de un taller. El análisis sigue aunque se cierre esta página. */
 export function PracticaControl({ workshopId }: { workshopId: number }) {
   const [cameras, setCameras] = useState<CameraMonitoringStatus[]>([]);
   const [active, setActive] = useState(false);
+  const [session, setSession] = useState<PracticeSession | null>(null);
   const [checkedAt, setCheckedAt] = useState(0);  // hora (s) de la última consulta de estado
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
-  const [canClear, setCanClear] = useState(false);
   const [rendimiento, setRendimiento] = useState<Rendimiento | null>(null);
-  const [clearPrevious, setClearPrevious] = useState(true);
-
-  useEffect(() => {
-    let active = true;
-    reglasLabService.getTestMode()
-      .then(mode => { if (active) setCanClear(mode.can_clear); })
-      .catch(() => { /* sin modo prueba */ });
-    return () => { active = false; };
-  }, []);
 
   const refresh = useCallback(async () => {
     try {
       const status = await reglasLabService.getMonitoring(workshopId);
       setCameras(status.cameras);
       setActive(Boolean(status.active));
+      setSession(status.session ?? null);
     } catch (reason) {
       setMessage(reason instanceof Error ? reason.message : 'No se pudo consultar el monitoreo.');
     }
@@ -49,7 +49,8 @@ export function PracticaControl({ workshopId }: { workshopId: number }) {
       .then(status => {
         if (!active) return;
         setCameras(status.cameras);
-      setActive(Boolean(status.active));
+        setActive(Boolean(status.active));
+        setSession(status.session ?? null);
         setCheckedAt(Date.now() / 1000);
       })
       .catch(() => { /* se reintenta en el siguiente ciclo */ });
@@ -76,20 +77,19 @@ export function PracticaControl({ workshopId }: { workshopId: number }) {
   const running = active || cameras.some(camera => camera.running);
 
   const toggle = async () => {
-    const clear = !running && canClear && clearPrevious;
-    if (clear && !window.confirm('Fase de prueba: se borrarán todas las incidencias, alertas y capturas de este taller antes de iniciar. ¿Continuar?')) {
-      return;
-    }
     setBusy(true);
     setMessage('');
     try {
       const result = running
         ? await reglasLabService.stopMonitoring(workshopId)
-        : await reglasLabService.startMonitoring(workshopId, clear);
+        : await reglasLabService.startMonitoring(workshopId);
       const problems = result.cameras.filter(camera => camera.started === false).map(camera => `Cámara ${camera.camera_id}: ${camera.detail}`);
       if (!running && result.cameras.length === 0) setMessage('El taller no tiene cámaras asignadas.');
       else if (problems.length) setMessage(problems.join(' · '));
-      else if (clear) setMessage(`Se borraron ${result.cleared_incidents ?? 0} incidencias de prueba.`);
+      else if (running && result.session) {
+        const s = result.session;
+        setMessage(`Práctica ${s.code} guardada: ${duracion(s.duration_seconds)}, ${s.alerts} alertas.`);
+      }
       await refresh();
     } catch (reason) {
       setMessage(reason instanceof Error ? reason.message : 'No se pudo cambiar el monitoreo.');
@@ -118,22 +118,30 @@ export function PracticaControl({ workshopId }: { workshopId: number }) {
               ? `${analyses} análisis (≈${rate.toFixed(1)}/s por cámara) · ${alerts} alertas. Continúa aunque cierres esta página.`
               : 'Al iniciar, se analizan todas las cámaras asignadas a este taller.'}
           </p>
+          {running && session && (
+            <p className="text-[10px] text-gray-400">
+              Sesión <span className="font-mono text-indigo-300">{session.code}</span>
+              {' '}· desde las {new Date(session.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              {session.started_by_name && ` · iniciada por ${session.started_by_name}`}
+              {' '}· todo lo detectado queda guardado en esta sesión
+            </p>
+          )}
           {rendimiento && (
             <p className="text-[10px] text-gray-500">
               {rendimiento.measured && rendimiento.ms_per_analysis
                 ? `Equipo: ${rendimiento.device} · ${(rendimiento.ms_per_analysis / 1000).toFixed(2)} s por análisis · `
                 : 'El equipo se mide al iniciar la primera práctica · '}
               hasta {rendimiento.max_fps} análisis/s por cámara ({rendimiento.manual ? 'fijado a mano' : 'automático'})
+              {rendimiento.slots_source && (
+                <>
+                  {' · '}{rendimiento.analysis_slots === 1 ? 'las cámaras se turnan (1 análisis a la vez)' : `${rendimiento.analysis_slots} cámaras analizan a la vez`}
+                  {rendimiento.physical_cores ? `, ${rendimiento.physical_cores} núcleos` : ''} ({ORIGEN_SIMULTANEOS[rendimiento.slots_source] ?? rendimiento.slots_source})
+                </>
+              )}
             </p>
           )}
           {rendimiento?.hint && <p className="text-[10px] text-amber-300">{rendimiento.hint}</p>}
           {message && <p role="alert" className="mt-1 text-[11px] text-amber-400">{message}</p>}
-          {!running && canClear && (
-            <label className="mt-1 flex items-center gap-1.5 text-[11px] text-gray-300">
-              <input type="checkbox" checked={clearPrevious} onChange={event => setClearPrevious(event.target.checked)} />
-              Borrar incidencias anteriores de este taller (fase de prueba)
-            </label>
-          )}
         </div>
       </div>
       <button

@@ -10,3 +10,10 @@ html, body, #root {
   padding: 0;
   overflow: hidden;
 }
+/* Impresión del reporte SST (ReportePDFModal se dibuja fuera de #root): solo sale la hoja. */
+@media print {
+  @page { size: A4; margin: 12mm; }
+  html, body { height: auto; overflow: visible; background: #fff; }
+  body:has(#reporte-sst-modal) #root { display: none; }
+  #reporte-sst-modal { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+}

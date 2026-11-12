@@ -17,11 +17,13 @@ const cameraFeedUrl = (cameraId: string, token: string, sync = true) =>
   `${API_URL}/modules/ai_vision/video_feed/${cameraId.replace('cam-', '')}?token=${encodeURIComponent(token)}&sync=${sync}`;
 
 const SYNC_KEY = 'safevision_sync_video';
+// Por defecto "En vivo", como la estación de cámara: con YOLO en CPU (~1 s por análisis, más con varias
+// cámaras) el modo sincronizado retrasaba el video 1-4 s. Solo se sincroniza si se eligió a mano.
 const readSyncPreference = () => {
   try {
-    return localStorage.getItem(SYNC_KEY) !== 'false';
+    return localStorage.getItem(SYNC_KEY) === 'true';
   } catch {
-    return true;
+    return false;
   }
 };
 

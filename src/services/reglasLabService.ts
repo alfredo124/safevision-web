@@ -90,6 +90,31 @@ export interface Incident {
   pending_seconds: number | null;
   /** Pendiente más tiempo del permitido: se avisa al administrador. */
   escalated: boolean;
+  /** Práctica en la que ocurrió; null en incidencias anteriores a las sesiones o fuera de una práctica. */
+  session_id?: number | null;
+  session_code?: string | null;
+}
+
+/** Una práctica guardada: desde "Iniciar práctica" hasta "Finalizar práctica". */
+export interface PracticeSession {
+  id: number;
+  code: string;
+  workshop_id: number;
+  workshop_name: string;
+  campus_name: string | null;
+  laboratory_type: LaboratoryType | null;
+  started_at: string;
+  ended_at: string | null;
+  active: boolean;
+  /** FINALIZADA: la cerró un usuario. INTERRUMPIDA: el servidor se apagó con la práctica en curso. */
+  end_reason: 'FINALIZADA' | 'INTERRUMPIDA' | null;
+  duration_seconds: number;
+  started_by_name: string | null;
+  ended_by_name: string | null;
+  alerts: number;
+  confirmed: number;
+  discarded: number;
+  pending: number;
 }
 
 export interface CameraMonitoringStatus {
@@ -111,7 +136,8 @@ export interface MonitoringResponse {
   /** La práctica está en curso (aunque todavía no tenga cámaras analizándose). */
   active?: boolean;
   cameras: CameraMonitoringStatus[];
-  cleared_incidents?: number;
+  /** Sesión abierta del laboratorio (al iniciar, la creada; al finalizar, la cerrada). */
+  session?: PracticeSession | null;
 }
 
 export interface IncidentDraft {
@@ -127,6 +153,94 @@ export interface IncidentDraft {
   frame_width?: number | null;
   frame_height?: number | null;
   occurred_at?: string;
+}
+
+/** Reporte SST de un periodo (GET /report), calculado con las incidencias guardadas. */
+export interface ReportCounts {
+  alerts: number;
+  confirmed: number;
+  discarded: number;
+  pending: number;
+}
+
+export interface ReportSummary extends ReportCounts {
+  faults: number;
+  /** Faltas leves: el EPP está, pero mal puesto (bata abierta, lentes fuera de los ojos). */
+  minor_faults: number;
+  faults_by_severity: Record<Severity, number>;
+  /** Confirmadas / (confirmadas + descartadas); null si no se revisó ninguna. */
+  precision: number | null;
+  avg_response_seconds: number | null;
+  actions: Record<ReviewAction, number>;
+  sessions: number;
+  /** Tiempo de práctica supervisada dentro del periodo. */
+  supervised_seconds: number;
+  /** Alertas registradas fuera de una sesión (datos anteriores o incidencias manuales). */
+  alerts_outside_sessions: number;
+}
+
+export interface ReportSession {
+  id: number;
+  code: string;
+  workshop_id: number;
+  workshop_name: string;
+  started_at: string;
+  ended_at: string | null;
+  end_reason: PracticeSession['end_reason'];
+  supervised_seconds: number;
+  alerts: number;
+}
+
+export interface ReportWorkshop extends ReportCounts {
+  workshop_id: number;
+  name: string;
+  laboratory_type: LaboratoryType;
+  campus_name: string | null;
+  required_equipment: string[];
+  faults: number;
+  avg_response_seconds: number | null;
+  sessions: number;
+  supervised_seconds: number;
+}
+
+export interface ReportEquipment {
+  equipment_id: string;
+  name: string;
+  faults: number;
+  confirmed_faults: number;
+}
+
+export interface ReportIncident {
+  id: number;
+  code: string;
+  occurred_at: string;
+  workshop_id: number;
+  workshop_name: string;
+  camera_name: string;
+  severity: Severity;
+  status: IncidentStatus;
+  action_taken: ReviewAction | null;
+  reviewed_by_name: string | null;
+  response_seconds: number | null;
+  session_id: number | null;
+  session_code: string | null;
+  faults: { equipment_name: string | null; rule_code: string | null; severity: Severity; detail: string | null }[];
+}
+
+export interface IncidentReport {
+  report_id: string;
+  generated_at: string;
+  generated_by: string;
+  fingerprint: string;
+  start: string;
+  end: string;
+  filters: { workshop_id: number | null; workshop_name: string | null; campus_id: number | null; campus_name: string | null };
+  summary: ReportSummary;
+  workshops: ReportWorkshop[];
+  equipment: ReportEquipment[];
+  sessions: ReportSession[];
+  incidents: ReportIncident[];
+  incidents_truncated: boolean;
 }
 
 function authHeaders(): HeadersInit {
@@ -156,12 +270,27 @@ export const reglasLabService = {
     request<Workshop>(`/workshops/${workshopId}/configuration`, { method: 'PUT', body: JSON.stringify(payload) }),
   createEquipment: (payload: Omit<SafetyEquipment, 'is_active'>) =>
     request<SafetyEquipment>('/equipment', { method: 'POST', body: JSON.stringify(payload) }),
-  getIncidents: (filters: { workshop_id?: number; camera_id?: number; date_from?: string; date_to?: string; status?: IncidentStatus } = {}) => {
+  getSessions: (filters: { workshop_id?: number; start?: string; end?: string } = {}) => {
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined) params.set(key, String(value));
+    });
+    return request<PracticeSession[]>(`/sessions${params.size ? `?${params}` : ''}`);
+  },
+  getIncidents: (filters: { workshop_id?: number; camera_id?: number; session_id?: number; active_session?: boolean; date_from?: string; date_to?: string; status?: IncidentStatus } = {}) => {
     const params = new URLSearchParams();
     Object.entries(filters).forEach(([key, value]) => {
       if (value !== undefined) params.set(key, String(value));
     });
     return request<Incident[]>(`/incidents${params.size ? `?${params}` : ''}`);
+  },
+  /** `start` y `end` con zona horaria (inicio del primer día y fin del último, en hora local). */
+  getReport: (filters: { start: string; end: string; workshop_id?: number; campus_id?: number }) => {
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined) params.set(key, String(value));
+    });
+    return request<IncidentReport>(`/report?${params}`);
   },
   createIncident: (payload: IncidentDraft) =>
     request<Incident>('/incidents', { method: 'POST', body: JSON.stringify(payload) }),
@@ -171,12 +300,8 @@ export const reglasLabService = {
   updateIncidentStatus: (incidentId: number, status: ManualStatus) =>
     request<Incident>(`/incidents/${incidentId}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   getMonitoring: (workshopId: number) => request<MonitoringResponse>(`/workshops/${workshopId}/monitoring`),
-  startMonitoring: (workshopId: number, clearPrevious = false) =>
-    request<MonitoringResponse>(`/workshops/${workshopId}/monitoring/start`, {
-      method: 'POST', body: JSON.stringify({ clear_previous: clearPrevious }),
-    }),
-  /** Fase de prueba: si el usuario puede borrar las incidencias previas al iniciar. */
-  getTestMode: () => request<{ enabled: boolean; can_clear: boolean }>('/test-mode'),
+  startMonitoring: (workshopId: number) =>
+    request<MonitoringResponse>(`/workshops/${workshopId}/monitoring/start`, { method: 'POST' }),
   stopMonitoring: (workshopId: number) =>
     request<MonitoringResponse>(`/workshops/${workshopId}/monitoring/stop`, { method: 'POST' }),
   /** Descarga la captura con el token en la cabecera (no en la URL) y devuelve una URL local. */
