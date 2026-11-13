@@ -1,5 +1,5 @@
 import { useServerChanges } from '../../services/changeEvents';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Calendar,
   Filter,
@@ -11,7 +11,8 @@ import {
   ShieldAlert,
   Image as ImageIcon,
 } from 'lucide-react';
-import { reglasLabService, type Incident, type IncidentStatus, type ReviewAction } from '../../services/reglasLabService';
+import { reglasLabService, type Incident, type IncidentStatus, type PracticeSession, type ReviewAction } from '../../services/reglasLabService';
+import { periodoLocal } from '../../services/formatoReporte';
 import { CapturaModal } from '../components/CapturaModal';
 import { severityStyle } from '../../services/severity';
 import { ACCION_REVISION, ESTADO_INCIDENCIA, claseModelo } from '../../services/etiquetas';
@@ -48,6 +49,9 @@ interface IncidenteHistorico {
   sesion: string | null;
   raw: Incident;
 }
+
+/** Máximo de incidencias por consulta (el servidor acepta hasta 2000). */
+const LIMITE_INCIDENCIAS = 2000;
 
 /** Fecha AAAA-MM-DD en la hora local del equipo (no en UTC). */
 const localDate = (date: Date) =>
@@ -97,47 +101,74 @@ export function IncidenciasPage() {
   const [ambientes, setAmbientes] = useState<{ id: number; name: string }[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [errorCarga, setErrorCarga] = useState('');
   const [captura, setCaptura] = useState<Incident | null>(null);
+  // Prácticas del periodo (GET /sessions), para elegir una concreta.
+  const [practicas, setPracticas] = useState<PracticeSession[]>([]);
+  // true si el servidor devolvió el máximo: puede haber más incidencias en el periodo.
+  const [truncado, setTruncado] = useState(false);
+  const fechasValidas = fechaInicio !== '' && fechaFin !== '' && fechaInicio <= fechaFin;
 
-  // Alertas nuevas o validadas desde otra pantalla: el historial se actualiza al instante.
-  useServerChanges(['incidents', 'workshops'], () => {
-    reglasLabService.getIncidents()
-      .then(incidents => setHistorial(incidents.map(mapIncident)))
-      .catch(() => { /* se reintenta */ });
-  });
-
-  useEffect(() => {
-    let active = true;
-    Promise.all([reglasLabService.getIncidents(), reglasLabService.getConfiguration()])
-      .then(([incidents, configuration]) => {
-        if (!active) return;
+  // El servidor filtra: la práctica elegida (completa, sin importar las fechas) o el periodo en hora
+  // local. Solo se aplica la respuesta de la última consulta, porque los filtros pueden cambiar mientras tanto.
+  const ultimaConsulta = useRef(0);
+  const cargar = useCallback(() => {
+    if (sesionFiltro === 'TODAS' && !fechasValidas) return;
+    const consulta = ++ultimaConsulta.current;
+    const filtros = sesionFiltro !== 'TODAS'
+      ? { session_id: Number(sesionFiltro), limit: LIMITE_INCIDENCIAS }
+      : { ...periodoLocal(fechaInicio, fechaFin), limit: LIMITE_INCIDENCIAS };
+    reglasLabService.getIncidents(filtros)
+      .then(incidents => {
+        if (consulta !== ultimaConsulta.current) return;
         setHistorial(incidents.map(mapIncident));
-        setAmbientes(configuration.workshops.map(workshop => ({ id: workshop.id, name: workshop.name })));
+        setTruncado(incidents.length >= LIMITE_INCIDENCIAS);
+        setErrorCarga('');
       })
-      .catch((reason: unknown) => { if (active) setError(reason instanceof Error ? reason.message : 'No se pudo cargar el historial.'); })
-      .finally(() => { if (active) setIsLoading(false); });
-    // Las alertas se validan también desde el panel global: se refresca cada 10 s.
-    const timer = window.setInterval(() => {
-      reglasLabService.getIncidents()
-        .then(incidents => { if (active) setHistorial(incidents.map(mapIncident)); })
-        .catch(() => { /* se reintenta */ });
-    }, 10000);
-    return () => { active = false; window.clearInterval(timer); };
+      .catch((reason: unknown) => {
+        if (consulta === ultimaConsulta.current) {
+          setErrorCarga(reason instanceof Error ? reason.message : 'No se pudo cargar el historial.');
+        }
+      })
+      .finally(() => { if (consulta === ultimaConsulta.current) setIsLoading(false); });
+  }, [sesionFiltro, fechasValidas, fechaInicio, fechaFin]);
+
+  const cargarPracticas = useCallback(() => {
+    if (!fechasValidas) return;
+    reglasLabService.getSessions(periodoLocal(fechaInicio, fechaFin))
+      .then(setPracticas)
+      .catch(() => { /* se reintenta con el siguiente cambio */ });
+  }, [fechasValidas, fechaInicio, fechaFin]);
+
+  // Al abrir la página y cada vez que cambian los filtros.
+  useEffect(() => { cargar(); }, [cargar]);
+  useEffect(() => { cargarPracticas(); }, [cargarPracticas]);
+  useEffect(() => {
+    reglasLabService.getConfiguration()
+      .then(configuration => setAmbientes(configuration.workshops.map(workshop => ({ id: workshop.id, name: workshop.name }))))
+      .catch(() => { /* el filtro de ambiente queda vacío */ });
   }, []);
 
-  // Sesiones presentes en el historial (las más recientes primero), para elegir una práctica concreta.
-  const sesiones = [...new Map(historial.filter(item => item.sesion)
-    .map(item => [item.sesion as string, { codigo: item.sesion as string, ambiente: item.ambiente, fecha: item.fecha }])).values()]
-    .filter(sesion => ambienteFiltro === 'TODOS' || sesion.ambiente === ambienteFiltro)
-    .sort((a, b) => b.codigo.localeCompare(a.codigo));
-
-  const datosFiltrados = historial.filter((item) => {
-    const cumpleAmbiente = ambienteFiltro === 'TODOS' || item.ambiente === ambienteFiltro;
-    // Con una sesión elegida se muestra la práctica completa, sin importar las fechas.
-    if (sesionFiltro !== 'TODAS') return cumpleAmbiente && item.sesion === sesionFiltro;
-    const cumpleFecha = item.fecha >= fechaInicio && item.fecha <= fechaFin;
-    return cumpleAmbiente && cumpleFecha;
+  // Alertas nuevas o validadas desde otra pantalla: el historial se actualiza al instante. Además se
+  // refresca cada 10 s por si se perdió un aviso. Siempre con los filtros vigentes.
+  const recargar = useRef(cargar);
+  useEffect(() => { recargar.current = cargar; }, [cargar]);
+  useServerChanges(['incidents', 'workshops', 'practica'], topics => {
+    recargar.current();
+    if (topics.includes('practica')) cargarPracticas();
   });
+  useEffect(() => {
+    const timer = window.setInterval(() => { recargar.current(); }, 10000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  // Prácticas del periodo para el selector (las más recientes primero), según el ambiente elegido.
+  const sesiones = practicas
+    .filter(practica => ambienteFiltro === 'TODOS' || practica.workshop_name === ambienteFiltro)
+    .map(practica => ({ id: practica.id, codigo: practica.code, ambiente: practica.workshop_name }));
+
+  // El periodo y la práctica ya los filtró el servidor; aquí solo queda el ambiente.
+  const datosFiltrados = historial.filter(item => ambienteFiltro === 'TODOS' || item.ambiente === ambienteFiltro);
 
   const totalIncidentes = datosFiltrados.length;
   const totalGraves = datosFiltrados.filter((i) => i.gravedad === 'CRÍTICO').length;
@@ -196,14 +227,16 @@ export function IncidenciasPage() {
             <input
               type="date"
               value={fechaInicio}
-              onChange={(e) => setFechaInicio(e.target.value)}
+              max={fechaFin || undefined}
+              onChange={(e) => { setFechaInicio(e.target.value); setSesionFiltro('TODAS'); }}
               className="bg-gray-900 border border-gray-700 text-gray-200 px-2 py-1 rounded focus:outline-none"
             />
             <span className="text-gray-500">a</span>
             <input
               type="date"
               value={fechaFin}
-              onChange={(e) => setFechaFin(e.target.value)}
+              min={fechaInicio || undefined}
+              onChange={(e) => { setFechaFin(e.target.value); setSesionFiltro('TODAS'); }}
               className="bg-gray-900 border border-gray-700 text-gray-200 px-2 py-1 rounded focus:outline-none"
             />
           </div>
@@ -226,7 +259,7 @@ export function IncidenciasPage() {
             >
               <option value="TODAS">Todas las prácticas</option>
               {sesiones.map(sesion => (
-                <option key={sesion.codigo} value={sesion.codigo}>{sesion.codigo} · {sesion.ambiente}</option>
+                <option key={sesion.id} value={String(sesion.id)}>{sesion.codigo} · {sesion.ambiente}</option>
               ))}
             </select>
           </div>
@@ -239,6 +272,15 @@ export function IncidenciasPage() {
       </div>
 
       {error && <p role="alert" className="rounded border border-red-900 bg-red-950/30 px-3 py-2 text-sm text-red-300">{error}</p>}
+      {errorCarga && <p role="alert" className="rounded border border-red-900 bg-red-950/30 px-3 py-2 text-sm text-red-300">{errorCarga}</p>}
+      {!fechasValidas && sesionFiltro === 'TODAS' && (
+        <p className="text-xs text-amber-400">La fecha inicial debe ser anterior o igual a la final.</p>
+      )}
+      {truncado && (
+        <p className="rounded border border-amber-800 bg-amber-950/30 px-3 py-2 text-xs text-amber-300">
+          Se muestran las {LIMITE_INCIDENCIAS} incidencias más recientes del periodo. Acorta las fechas o elige una práctica para ver el resto.
+        </p>
+      )}
       {isLoading && <p className="text-sm text-gray-400">Cargando incidencias...</p>}
 
       {/* Tarjetas KPI de Resumen */}
@@ -348,8 +390,8 @@ export function IncidenciasPage() {
                 <tr key={row.id} className="hover:bg-gray-800/30 transition-colors">
                   <td className="p-3 font-mono text-indigo-400 font-semibold">
                     {row.codigo}
-                    {row.sesion && (
-                      <button type="button" onClick={() => setSesionFiltro(row.sesion as string)}
+                    {row.sesion && row.raw.session_id != null && (
+                      <button type="button" onClick={() => setSesionFiltro(String(row.raw.session_id))}
                         title="Ver todas las alertas de esta práctica"
                         className="block text-[10px] font-normal text-gray-500 hover:text-gray-300 hover:underline">
                         {row.sesion}

@@ -27,3 +27,16 @@ export const fecha = (iso: string) =>
 /** Periodo [start, end) del reporte como días locales: "01/11/2026 al 12/11/2026". */
 export const periodo = (start: string, end: string) =>
   `${fecha(start)} al ${fecha(new Date(new Date(end).getTime() - 1).toISOString())}`;
+
+/** Fecha local en formato del input date (AAAA-MM-DD), no en UTC. */
+export const fechaInput = (valor: Date) =>
+  `${valor.getFullYear()}-${String(valor.getMonth() + 1).padStart(2, '0')}-${String(valor.getDate()).padStart(2, '0')}`;
+
+/** Inicio del primer día y fin del último (AAAA-MM-DD), en la hora local del navegador, como ISO con zona.
+ *  Es el formato de periodo que esperan /report, /reports, /incidents y la bitácora. */
+export function periodoLocal(desde: string, hasta: string) {
+  const start = new Date(`${desde}T00:00:00`);
+  const end = new Date(`${hasta}T00:00:00`);
+  end.setDate(end.getDate() + 1);
+  return { start: start.toISOString(), end: end.toISOString() };
+}

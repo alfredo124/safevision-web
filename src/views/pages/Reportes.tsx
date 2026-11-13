@@ -1,26 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Building2, Calendar, Eye, FileText, Loader2, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Building2, Calendar, CheckCircle2, Eye, FileText, Loader2, RefreshCw, ShieldQuestion, XCircle } from 'lucide-react';
 import { ReportePDFModal } from '../components/ReportePDFModal';
-import { reglasLabService, type IncidentReport, type Workshop } from '../../services/reglasLabService';
+import { reglasLabService, type IncidentReport, type IssuedReport, type IssuedReportCheck, type Workshop } from '../../services/reglasLabService';
 import { usuariosService, type Local } from '../../services/usuariosService';
 import { useServerChanges } from '../../services/changeEvents';
-import { duracion, fechaHora, periodo, porcentaje } from '../../services/formatoReporte';
-
-/** Fecha local en formato del input date (AAAA-MM-DD). */
-const fechaInput = (fecha: Date) =>
-  `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}-${String(fecha.getDate()).padStart(2, '0')}`;
+import { duracion, fechaHora, fechaInput, periodo, periodoLocal, porcentaje } from '../../services/formatoReporte';
 
 const hoy = new Date();
 const INICIO_MES = fechaInput(new Date(hoy.getFullYear(), hoy.getMonth(), 1));
 const HOY = fechaInput(hoy);
-
-/** Inicio del primer día y fin del último, en la hora local del navegador (con zona, en ISO). */
-function periodoLocal(desde: string, hasta: string) {
-  const start = new Date(`${desde}T00:00:00`);
-  const end = new Date(`${hasta}T00:00:00`);
-  end.setDate(end.getDate() + 1);
-  return { start: start.toISOString(), end: end.toISOString() };
-}
 
 export function ReportesPage() {
   const [fechaInicio, setFechaInicio] = useState(INICIO_MES);
@@ -35,13 +23,57 @@ export function ReportesPage() {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
+  // Reporte emitido (guardado con su código y huella): es el que se muestra en el documento.
+  const [emitido, setEmitido] = useState<IncidentReport | null>(null);
+  const [emitiendo, setEmitiendo] = useState(false);
+  const [emitidos, setEmitidos] = useState<IssuedReport[]>([]);
+  const [verificaciones, setVerificaciones] = useState<Record<string, IssuedReportCheck | 'cargando' | 'error'>>({});
 
   const fechasValidas = fechaInicio !== '' && fechaFin !== '' && fechaInicio <= fechaFin;
+
+  const cargarEmitidos = useCallback(() => {
+    reglasLabService.getIssuedReports().then(setEmitidos).catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     reglasLabService.getConfiguration().then(config => setLaboratorios(config.workshops)).catch(() => undefined);
     usuariosService.listarLocales().then(lista => setLocales(lista.filter(local => local.is_active))).catch(() => undefined);
-  }, []);
+    cargarEmitidos();
+  }, [cargarEmitidos]);
+
+  /** Emite el reporte que se está viendo (mismo periodo y filtros) y abre el documento. Al emitirlo
+   *  queda guardado con su código, responsable y huella, y aparece en "Reportes emitidos". */
+  const emitir = async () => {
+    if (!reporte) return;
+    setEmitiendo(true);
+    setError(null);
+    try {
+      const datos = await reglasLabService.emitReport({
+        start: reporte.start,
+        end: reporte.end,
+        workshop_id: reporte.filters.workshop_id ?? undefined,
+        campus_id: reporte.filters.campus_id ?? undefined,
+        responsible: responsable,
+      });
+      setEmitido(datos);
+      setShowPreviewModal(true);
+      cargarEmitidos();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo emitir el reporte.');
+    } finally {
+      setEmitiendo(false);
+    }
+  };
+
+  const verificar = async (code: string) => {
+    setVerificaciones(actual => ({ ...actual, [code]: 'cargando' }));
+    try {
+      const resultado = await reglasLabService.verifyIssuedReport(code);
+      setVerificaciones(actual => ({ ...actual, [code]: resultado }));
+    } catch {
+      setVerificaciones(actual => ({ ...actual, [code]: 'error' }));
+    }
+  };
 
   const laboratoriosDelLocal = useMemo(
     () => (campusId === '' ? laboratorios : laboratorios.filter(lab => lab.campus_id === campusId)),
@@ -155,11 +187,14 @@ export function ReportesPage() {
               {cargando ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
               <span>Generar reporte</span>
             </button>
-            <button onClick={() => setShowPreviewModal(true)} disabled={!reporte || cargando}
+            <button onClick={() => void emitir()} disabled={!reporte || cargando || emitiendo}
               className="w-full flex items-center justify-center gap-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed border border-gray-700 text-gray-200 font-semibold p-2.5 rounded text-xs transition-colors">
-              <Eye className="w-4 h-4 text-emerald-400" />
-              <span>Ver documento / Guardar PDF</span>
+              {emitiendo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4 text-emerald-400" />}
+              <span>Emitir y ver documento / Guardar PDF</span>
             </button>
+            <p className="text-[10px] text-gray-500 leading-snug">
+              Al emitirlo, el reporte queda guardado con un código y su huella para poder verificarlo más adelante.
+            </p>
           </div>
         </div>
 
@@ -179,7 +214,7 @@ export function ReportesPage() {
             <>
               <div className="flex flex-wrap justify-between gap-2 border-b border-gray-800 pb-3 text-xs">
                 <div>
-                  <p className="font-mono text-indigo-400 font-bold">{reporte.report_id}</p>
+                  <p className="font-bold text-indigo-400">Vista previa <span className="font-normal text-gray-500">· aún no emitido</span></p>
                   <p className="text-gray-400">{nombreLocal} · {nombreLaboratorio}</p>
                 </div>
                 <p className="text-gray-400 self-end">{periodo(reporte.start, reporte.end)}</p>
@@ -272,12 +307,79 @@ export function ReportesPage() {
         </div>
       )}
 
-      {reporte && (
+      {/* Reportes emitidos: quedan guardados; "Verificar" recalcula y compara la huella */}
+      {emitidos.length > 0 && (
+        <div className="bg-[#16181e] p-4 md:p-6 rounded-lg border border-gray-800 space-y-3">
+          <div className="border-b border-gray-800 pb-2">
+            <h2 className="text-xs font-bold text-gray-300 uppercase tracking-wider">Reportes emitidos</h2>
+            <p className="text-[11px] text-gray-500 mt-1">
+              «Verificar» recalcula el reporte con los datos de hoy. Si la huella no coincide, algo del periodo cambió después
+              de emitirlo (p. ej. se validó una alerta, o el periodo aún no había terminado).
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs min-w-[640px]">
+              <thead className="text-[10px] uppercase text-gray-500 border-b border-gray-800">
+                <tr>
+                  <th className="py-2 pr-2">Código</th>
+                  <th className="py-2 px-2">Emitido</th>
+                  <th className="py-2 px-2">Periodo</th>
+                  <th className="py-2 px-2">Alcance</th>
+                  <th className="py-2 px-2">Responsable</th>
+                  <th className="py-2 pl-2 text-right">Verificación</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-800/70">
+                {emitidos.map(item => {
+                  const verificacion = verificaciones[item.code];
+                  return (
+                    <tr key={item.code}>
+                      <td className="py-2 pr-2 font-mono text-indigo-400 whitespace-nowrap">{item.code}</td>
+                      <td className="py-2 px-2 whitespace-nowrap">
+                        {fechaHora(item.generated_at)}
+                        {item.generated_by && <span className="block text-[10px] text-gray-500">{item.generated_by}</span>}
+                      </td>
+                      <td className="py-2 px-2 whitespace-nowrap">{periodo(item.start, item.end)}</td>
+                      <td className="py-2 px-2 text-gray-300">
+                        {item.filters.workshop_name ?? item.filters.campus_name ?? 'Todos los laboratorios'}
+                      </td>
+                      <td className="py-2 px-2 text-gray-300">{item.responsible ?? '—'}</td>
+                      <td className="py-2 pl-2 text-right whitespace-nowrap">
+                        {verificacion === undefined && (
+                          <button onClick={() => void verificar(item.code)}
+                            className="inline-flex items-center gap-1 rounded border border-gray-700 px-2 py-1 text-[11px] text-gray-200 hover:bg-gray-800">
+                            <ShieldQuestion className="w-3.5 h-3.5" /> Verificar
+                          </button>
+                        )}
+                        {verificacion === 'cargando' && <Loader2 className="inline w-4 h-4 animate-spin text-gray-400" />}
+                        {verificacion === 'error' && <span className="text-amber-400">No se pudo verificar</span>}
+                        {typeof verificacion === 'object' && (verificacion.matches ? (
+                          <span className="inline-flex items-center gap-1 text-emerald-400"><CheckCircle2 className="w-3.5 h-3.5" /> Coincide</span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-red-400" title={`Huella actual: ${verificacion.current_fingerprint}`}>
+                            <XCircle className="w-3.5 h-3.5" /> Los datos cambiaron
+                          </span>
+                        ))}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {emitido && (
         <ReportePDFModal
           isOpen={showPreviewModal}
           onClose={() => setShowPreviewModal(false)}
-          reporte={reporte}
-          encabezado={{ responsable, local: nombreLocal, laboratorios: nombreLaboratorio }}
+          reporte={emitido}
+          encabezado={{
+            responsable: emitido.responsible ?? '',
+            local: emitido.filters.campus_name ?? 'Todos los locales',
+            laboratorios: emitido.filters.workshop_name ?? 'Todos los laboratorios',
+          }}
         />
       )}
     </div>

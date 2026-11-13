@@ -7,7 +7,6 @@ const API_URL = `${API_BASE}/modules/reglas_lab`;
 export type LaboratoryType = 'QUIMICA' | 'FISICA';
 export type Severity = 'CRÍTICO' | 'ALTO' | 'MEDIO';
 export type IncidentStatus = 'PENDIENTE' | 'EN_REVISION' | 'CONFIRMADA' | 'DESCARTADA' | 'ATENDIDO';
-export type ManualStatus = 'PENDIENTE' | 'EN_REVISION' | 'ATENDIDO';
 export type ReviewAction = 'CORREGIDO' | 'RETIRADO_DE_PRACTICA';
 
 export interface CameraSummary {
@@ -197,6 +196,8 @@ export interface ReportWorkshop extends ReportCounts {
   laboratory_type: LaboratoryType;
   campus_name: string | null;
   required_equipment: string[];
+  /** PRACTICAS: lo exigido en las prácticas del periodo. ACTUAL: no hubo prácticas con copia; configuración de hoy. */
+  required_equipment_source: 'PRACTICAS' | 'ACTUAL';
   faults: number;
   avg_response_seconds: number | null;
   sessions: number;
@@ -241,6 +242,30 @@ export interface IncidentReport {
   sessions: ReportSession[];
   incidents: ReportIncident[];
   incidents_truncated: boolean;
+  /** Solo en un reporte emitido (POST /reports): queda guardado con su código y huella. */
+  issued?: boolean;
+  responsible?: string | null;
+}
+
+/** Reporte emitido, tal como queda guardado (GET /reports). */
+export interface IssuedReport {
+  code: string;
+  start: string;
+  end: string;
+  filters: Partial<IncidentReport['filters']>;
+  workshop_ids: number[];
+  responsible: string | null;
+  fingerprint: string;
+  summary: Partial<ReportCounts & { sessions: number }>;
+  generated_by: string | null;
+  generated_at: string;
+}
+
+/** Verificación de un reporte emitido: se recalcula con el mismo periodo y laboratorios. */
+export interface IssuedReportCheck extends IssuedReport {
+  current_fingerprint: string;
+  /** false: los datos del periodo cambiaron después de emitirlo. */
+  matches: boolean;
 }
 
 function authHeaders(): HeadersInit {
@@ -277,7 +302,9 @@ export const reglasLabService = {
     });
     return request<PracticeSession[]>(`/sessions${params.size ? `?${params}` : ''}`);
   },
-  getIncidents: (filters: { workshop_id?: number; camera_id?: number; session_id?: number; active_session?: boolean; date_from?: string; date_to?: string; status?: IncidentStatus } = {}) => {
+  /** `start`/`end` con zona horaria (inicio del primer día y fin del último, en hora local).
+   *  Sin periodo ni práctica devuelve las `limit` más recientes (500 por defecto). */
+  getIncidents: (filters: { workshop_id?: number; camera_id?: number; session_id?: number; active_session?: boolean; start?: string; end?: string; status?: IncidentStatus; limit?: number } = {}) => {
     const params = new URLSearchParams();
     Object.entries(filters).forEach(([key, value]) => {
       if (value !== undefined) params.set(key, String(value));
@@ -292,13 +319,16 @@ export const reglasLabService = {
     });
     return request<IncidentReport>(`/report?${params}`);
   },
+  /** Emite el reporte: queda guardado con su código, responsable y huella para verificarlo después. */
+  emitReport: (payload: { start: string; end: string; workshop_id?: number; campus_id?: number; responsible: string }) =>
+    request<IncidentReport>('/reports', { method: 'POST', body: JSON.stringify(payload) }),
+  getIssuedReports: () => request<IssuedReport[]>('/reports'),
+  verifyIssuedReport: (code: string) => request<IssuedReportCheck>(`/reports/${encodeURIComponent(code)}/verify`),
   createIncident: (payload: IncidentDraft) =>
     request<Incident>('/incidents', { method: 'POST', body: JSON.stringify(payload) }),
   /** Confirmar (con la acción tomada) o descartar una alerta. El revisor sale de la sesión. */
   reviewIncident: (incidentId: number, payload: { decision: 'CONFIRMADA'; action: ReviewAction } | { decision: 'DESCARTADA'; reason?: string }) =>
     request<Incident>(`/incidents/${incidentId}/review`, { method: 'POST', body: JSON.stringify(payload) }),
-  updateIncidentStatus: (incidentId: number, status: ManualStatus) =>
-    request<Incident>(`/incidents/${incidentId}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   getMonitoring: (workshopId: number) => request<MonitoringResponse>(`/workshops/${workshopId}/monitoring`),
   startMonitoring: (workshopId: number) =>
     request<MonitoringResponse>(`/workshops/${workshopId}/monitoring/start`, { method: 'POST' }),

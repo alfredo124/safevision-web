@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Radio, Settings, Clock, FileText, Smartphone, PanelLeftClose, PanelLeftOpen, Users } from 'lucide-react';
+import { Radio, Settings, Clock, FileText, Smartphone, PanelLeftClose, PanelLeftOpen, Users, History } from 'lucide-react';
 import { useCollapsible } from '../../hooks/useCollapsible';
 import { authService } from '../../services/authService';
 
@@ -11,7 +11,10 @@ const LINKS = [
   { to: '/reportes', icon: FileText, label: 'Reportes SST', short: 'Reportes' },
 ];
 // Solo para el administrador general.
-const ADMIN_LINKS = [{ to: '/usuarios', end: false, icon: Users, label: 'Usuarios y locales', short: 'Usuarios', pulse: false }];
+const ADMIN_LINKS = [
+  { to: '/usuarios', end: false, icon: Users, label: 'Usuarios y locales', short: 'Usuarios', pulse: false },
+  { to: '/bitacora', end: false, icon: History, label: 'Bitácora', short: 'Bitácora', pulse: false },
+];
 
 export function Sidebar() {
   // Plegado (solo iconos) o desplegado (con nombres). En el celular en vertical es la barra inferior.

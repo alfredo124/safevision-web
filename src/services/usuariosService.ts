@@ -47,6 +47,22 @@ export interface Local {
 
 export type DatosLocal = { name: string; city?: string | null; address?: string | null; is_active?: boolean };
 
+/** Áreas de la bitácora (las mismas que app/core/bitacora.py MODULOS). */
+export type AreaBitacora = 'usuarios' | 'locales' | 'laboratorios' | 'camaras' | 'practicas' | 'incidencias' | 'reportes';
+
+/** Una acción registrada en la bitácora: quién, qué, cuándo y desde qué equipo. */
+export interface RegistroBitacora {
+  id: number;
+  timestamp: string;
+  user_id: number | null;
+  user_name: string | null;
+  /** Código corto, p. ej. CONFIRMAR_ALERTA. */
+  action: string;
+  module: AreaBitacora;
+  description: string | null;
+  ip_address: string | null;
+}
+
 async function pedir<T>(ruta: string, init: RequestInit = {}): Promise<T> {
   const token = authService.getCurrentUser()?.token;
   if (!token) throw new Error('Inicia sesión para continuar.');
@@ -72,6 +88,13 @@ export const usuariosService = {
   listarLocales: () => pedir<Local[]>('/modules/reglas_lab/campuses'),
   crearLocal: (datos: DatosLocal) => pedir<Local>('/modules/reglas_lab/campuses', json('POST', datos)),
   actualizarLocal: (id: number, datos: Partial<DatosLocal>) => pedir<Local>(`/modules/reglas_lab/campuses/${id}`, json('PATCH', datos)),
+
+  /** Bitácora (solo el administrador). `start`/`end` con zona horaria. */
+  bitacora: (filtros: { module?: AreaBitacora; start?: string; end?: string; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    Object.entries(filtros).forEach(([clave, valor]) => { if (valor !== undefined) params.set(clave, String(valor)); });
+    return pedir<RegistroBitacora[]>(`/modules/auth_db/activity${params.size ? `?${params}` : ''}`);
+  },
 
   /** Cambia el local de un laboratorio. */
   asignarLocal: (workshopId: number, campusId: number | null) =>

@@ -207,7 +207,13 @@ export function ReportePDFModal({ isOpen, onClose, reporte, encabezado }: Report
                         {lab.name}
                         {lab.campus_name && <span className="block font-normal text-gray-500">{lab.campus_name}</span>}
                       </td>
-                      <td className={td}>{lab.required_equipment.join(', ') || '—'}</td>
+                      <td className={td}>
+                        {lab.required_equipment.join(', ') || '—'}
+                        {/* Sin prácticas con copia de reglas en el periodo: se muestra la configuración de hoy. */}
+                        {lab.required_equipment_source === 'ACTUAL' && lab.required_equipment.length > 0 && (
+                          <span className="block text-gray-500">(configuración actual)</span>
+                        )}
+                      </td>
                       <td className={`${td} text-right whitespace-nowrap`}>
                         {lab.sessions}
                         {lab.sessions > 0 && <span className="block text-gray-500">{duracion(lab.supervised_seconds)}</span>}
@@ -346,7 +352,8 @@ export function ReportePDFModal({ isOpen, onClose, reporte, encabezado }: Report
               </p>
               <p>
                 Huella SHA-256 del contenido: <code className="font-mono text-[8.5px] break-all text-gray-900">{reporte.fingerprint}</code>.
-                Si se vuelve a generar el reporte del mismo periodo y la huella no coincide, alguna alerta cambió después de esta emisión.
+                El reporte {reporte.report_id} queda registrado en SafeVision con esta huella: desde «Reportes emitidos» se puede
+                verificar si los datos del periodo cambiaron después de esta emisión.
               </p>
             </div>
           </Seccion>

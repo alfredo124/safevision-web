@@ -11,6 +11,7 @@ import { ReportesPage } from './views/pages/Reportes';
 import { EstacionCamaraPage } from './views/pages/EstacionCamara';
 import { UsuariosPage } from './views/pages/Usuarios';
 import { ConfiguracionInicialPage } from './views/pages/ConfiguracionInicial';
+import { BitacoraPage } from './views/pages/Bitacora';
 import { authService } from './services/authService';
 
 function ProtectedRoutes() {
@@ -43,6 +44,7 @@ export default function App() {
             <Route path="estacion" element={<EstacionCamaraPage />} />
             <Route element={<AdminRoutes />}>
               <Route path="usuarios" element={<UsuariosPage />} />
+              <Route path="bitacora" element={<BitacoraPage />} />
             </Route>
           </Route>
         </Route>
